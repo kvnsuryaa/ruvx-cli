@@ -1,0 +1,59 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/kovr-target/release/kovr",
+  "binary_sha256": "98becd7b94ae58a25f02a97550bec415f7072d090bf693ef7f5e7eeaf626f10c",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "multiline paste, Unicode, resize, single submission",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios and bracketed paste; no alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      51.977082970552146,
+      61.214542016386986,
+      57.6881670858711,
+      52.47029196470976,
+      52.53274994902313,
+      54.82270906213671,
+      57.5027089798823,
+      56.74262496177107,
+      55.60374993365258,
+      56.29683309234679,
+      54.75687503349036,
+      55.54087494965643,
+      54.69695804640651,
+      57.33420897740871,
+      56.10275000799447,
+      55.7137499563396,
+      56.11604196019471,
+      55.40695902891457,
+      58.0382919870317,
+      54.12458395585418
+    ],
+    "startup_p95_ms": 58.038,
+    "startup_median_ms": 55.659,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 4612096,
+    "binary_bytes": 5576672,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 7278592,
+      "snapshot_and_shell": 7700480,
+      "larger_resume": 4743168
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  }
+}

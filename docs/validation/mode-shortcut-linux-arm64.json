@@ -1,0 +1,22 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/target/release/kovr",
+  "binary_sha256": "3926878bec354a36fe4dd3e5b2c98f5695bc8223177bb1684bc21894a3a1b564",
+  "functional": [
+    "slash filtering, required argument, Tab completion, Escape/edit, 48x16 and help click without inference",
+    "Shift+Tab switches Plan/Build without sending or losing the draft",
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "global model and effort on restart and concurrent other-project window; /new reloads latest default without inference",
+    "resume keeps session model without replay or overwriting global default; SIGTERM cleanup"
+  ]
+}

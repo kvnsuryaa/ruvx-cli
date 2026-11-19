@@ -1,0 +1,60 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/target/release/kovr",
+  "binary_sha256": "b949318e2cf707f297b7eca328812c44e5a09b0f14f178b49d1ba9587d645593",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      55.216167005710304,
+      58.74775000847876,
+      59.1850409982726,
+      55.550500052049756,
+      57.83662502653897,
+      54.23712497577071,
+      55.24687492288649,
+      51.7303750384599,
+      52.71920806262642,
+      57.20129096880555,
+      55.963916005566716,
+      55.24370796047151,
+      58.78279102034867,
+      104.71537499688566,
+      54.90487499628216,
+      56.47554202005267,
+      54.332208004780114,
+      56.14499992225319,
+      61.19875004515052,
+      60.84954098332673
+    ],
+    "startup_p95_ms": 61.199,
+    "startup_median_ms": 56.054,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 5005312,
+    "binary_bytes": 5642240,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 6766592,
+      "snapshot_and_shell": 7028736,
+      "larger_resume": 4481024
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  }
+}

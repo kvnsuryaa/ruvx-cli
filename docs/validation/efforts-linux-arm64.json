@@ -1,0 +1,61 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/target/release/kovr",
+  "binary_sha256": "5535bb1e6ab393be083b00e8a9aaaa48f4e7dd52a2de75430526b7c651b8d4a8",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      55.0077089574188,
+      59.04670909512788,
+      55.888542090542614,
+      55.82270899321884,
+      55.23895798251033,
+      59.81879204045981,
+      55.71083398535848,
+      57.86675005219877,
+      55.95254199579358,
+      52.201790967956185,
+      52.67962603829801,
+      53.18887496832758,
+      58.32829198334366,
+      56.63254205137491,
+      54.64437499176711,
+      56.26162490807474,
+      55.87995797395706,
+      56.94054195191711,
+      60.41704199742526,
+      55.91845791786909
+    ],
+    "startup_p95_ms": 59.819,
+    "startup_median_ms": 55.904,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 5267456,
+    "binary_bytes": 5707776,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 7024640,
+      "snapshot_and_shell": 7417856,
+      "larger_resume": 4997120
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  }
+}

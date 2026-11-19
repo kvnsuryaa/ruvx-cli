@@ -1,0 +1,20 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/target/release/kovr",
+  "binary_sha256": "4eb94ed6b1239d8eb6485019f261583d1264b250fa6faf4459b261946b65f674",
+  "functional": [
+    "slash filtering, required argument, Tab completion, Escape/edit, 48x16 and help click without inference",
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ]
+}

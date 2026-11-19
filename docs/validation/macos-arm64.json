@@ -1,0 +1,59 @@
+{
+  "platform": "macOS-14.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.10",
+  "binary": "/Users/macbook/Documents/kerjaan/kovr-cli/target/release/kovr",
+  "binary_sha256": "5fbfa3d8fc9418207145dbd3ab6676cc8ed218ce7f94357361a3d78380a47ff2",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "multiline paste, Unicode, resize, single submission",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios and bracketed paste; no alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      55.081874947063625,
+      58.028166997246444,
+      57.02991597354412,
+      56.225292035378516,
+      56.38924997765571,
+      55.97579199820757,
+      57.6535000000149,
+      55.795209016650915,
+      59.755624970421195,
+      55.24029105436057,
+      58.76045802142471,
+      56.48750008549541,
+      58.39695793110877,
+      62.387999962083995,
+      56.095332955010235,
+      59.423541999422014,
+      54.08233299385756,
+      55.92687497846782,
+      55.097959004342556,
+      56.0806249268353
+    ],
+    "startup_p95_ms": 59.756,
+    "startup_median_ms": 56.307,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 5767168,
+    "binary_bytes": 5872816,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 9289728,
+      "snapshot_and_shell": 11091968,
+      "larger_resume": 5898240
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  }
+}

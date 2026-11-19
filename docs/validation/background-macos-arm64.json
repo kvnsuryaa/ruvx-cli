@@ -1,0 +1,19 @@
+{
+  "platform": "macOS-14.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.10",
+  "binary": "/Users/macbook/Documents/kerjaan/kovr-cli/target/release/kovr",
+  "binary_sha256": "7a8ea92e4a48e83a1360a52233d3188576e7ab89cfb7cb0b62acc5d5d1eaf219",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ]
+}

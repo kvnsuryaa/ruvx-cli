@@ -1,0 +1,60 @@
+{
+  "platform": "macOS-14.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.10",
+  "binary": "/Users/macbook/Documents/kerjaan/kovr-cli/target/release/kovr",
+  "binary_sha256": "2ef1e145953cb576dfd130d42931e2d1cb9a68222f2d6ab611ba45c9978e9bdc",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      60.976958950050175,
+      61.56400009058416,
+      61.81874999310821,
+      62.23000003956258,
+      63.83545801509172,
+      62.97608301974833,
+      56.77875003311783,
+      56.95700005162507,
+      56.76533398218453,
+      62.60058400221169,
+      62.45979096274823,
+      63.35487507749349,
+      66.07054197229445,
+      59.26679098047316,
+      57.715625036507845,
+      62.52041703555733,
+      62.666333047673106,
+      56.76199996378273,
+      62.67966702580452,
+      57.17862502206117
+    ],
+    "startup_p95_ms": 63.835,
+    "startup_median_ms": 62.024,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 6307840,
+    "binary_bytes": 5945232,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 8601600,
+      "snapshot_and_shell": 9945088,
+      "larger_resume": 7258112
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  }
+}

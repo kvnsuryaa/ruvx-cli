@@ -1,0 +1,61 @@
+{
+  "platform": "macOS-14.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.10",
+  "binary": "/Users/macbook/Documents/kerjaan/kovr-cli/target/release/kovr",
+  "binary_sha256": "e7b352934b750ed81e08fa742bb470eab49c5830ba225a54fbbcd79e10af09cc",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      56.512582930736244,
+      58.960790978744626,
+      57.98012507148087,
+      59.644624940119684,
+      59.58524998277426,
+      58.76741709653288,
+      65.18908392172307,
+      56.91508390009403,
+      60.30412495601922,
+      54.62958395946771,
+      53.48054098431021,
+      58.84533398784697,
+      57.106625055894256,
+      57.04083293676376,
+      57.820749934762716,
+      58.12329100444913,
+      59.76049997843802,
+      58.45587502699345,
+      58.15683410037309,
+      58.386833989061415
+    ],
+    "startup_p95_ms": 60.304,
+    "startup_median_ms": 58.272,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 6586368,
+    "binary_bytes": 6015488,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 8945664,
+      "snapshot_and_shell": 10272768,
+      "larger_resume": 6668288
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  }
+}

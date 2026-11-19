@@ -1,0 +1,80 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/target/release/kovr",
+  "binary_sha256": "6f225822d61b56562a6aae963f38440acfc283e57112c8d3cb04d9828fb4baaf",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      55.11820805259049,
+      61.34620797820389,
+      54.94008306413889,
+      54.523375001735985,
+      56.689374963752925,
+      54.47937501594424,
+      52.152207936160266,
+      52.744499989785254,
+      61.963125015608966,
+      57.41645896341652,
+      55.455958005040884,
+      54.64558303356171,
+      55.97224994562566,
+      55.03849999513477,
+      53.90862503554672,
+      56.00108404178172,
+      55.508833029307425,
+      56.61108298227191,
+      54.6001250622794,
+      54.61729096714407
+    ],
+    "startup_p95_ms": 61.346,
+    "startup_median_ms": 55.078,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 5206016,
+    "binary_bytes": 5773312,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 7098368,
+      "snapshot_and_shell": 7491584,
+      "larger_resume": 4280320
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  },
+  "paste_profile": {
+    "cases": [
+      {
+        "paste_bytes": 1048576,
+        "transfer_and_preview_ms": 86.172,
+        "keyboard_response_ms": 51.386,
+        "observed_parent_rss_max_bytes": 7303168
+      },
+      {
+        "paste_bytes": 10485760,
+        "transfer_and_preview_ms": 304.122,
+        "keyboard_response_ms": 51.085,
+        "preflight_context_rejected_draft_preserved": true,
+        "observed_parent_rss_max_bytes": 47161344
+      }
+    ],
+    "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+  }
+}

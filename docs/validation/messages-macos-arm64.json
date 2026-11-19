@@ -1,0 +1,80 @@
+{
+  "platform": "macOS-14.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.10",
+  "binary": "/Users/macbook/Documents/kerjaan/kovr-cli/target/release/kovr",
+  "binary_sha256": "7268a7487a9039a080cb88756434f67037fb98fd6999aa8f042cdee9778cb9d6",
+  "functional": [
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "resume without replay; SIGTERM cleanup"
+  ],
+  "performance": {
+    "samples": 20,
+    "startup_ms": [
+      57.817833963781595,
+      55.84745795931667,
+      55.600875057280064,
+      57.269667042419314,
+      54.90191699936986,
+      56.16887495853007,
+      54.31724991649389,
+      54.16283302474767,
+      54.931042017415166,
+      55.47279107850045,
+      60.55704096797854,
+      56.550958077423275,
+      53.474417072720826,
+      54.62850001640618,
+      56.23912496957928,
+      55.189540958963335,
+      55.78837497159839,
+      55.200708913616836,
+      55.015375022776425,
+      55.11216598097235
+    ],
+    "startup_p95_ms": 57.818,
+    "startup_median_ms": 55.337,
+    "idle_observation_seconds": 10,
+    "idle_rss_max_bytes": 5931008,
+    "binary_bytes": 6120080,
+    "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+  },
+  "load_profile": {
+    "workspace_text_files": 256,
+    "workspace_text_bytes_per_file": 4096,
+    "streamed_text_bytes": 32785,
+    "additional_historical_conversations": 256,
+    "observed_parent_rss_max_bytes_by_stage": {
+      "file_tools_and_streaming": 8699904,
+      "snapshot_and_shell": 10256384,
+      "larger_resume": 7536640
+    },
+    "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+  },
+  "paste_profile": {
+    "cases": [
+      {
+        "paste_bytes": 1048576,
+        "transfer_and_preview_ms": 164.95,
+        "keyboard_response_ms": 55.335,
+        "observed_parent_rss_max_bytes": 11730944
+      },
+      {
+        "paste_bytes": 10485760,
+        "transfer_and_preview_ms": 946.176,
+        "keyboard_response_ms": 54.937,
+        "preflight_context_rejected_draft_preserved": true,
+        "observed_parent_rss_max_bytes": 85131264
+      }
+    ],
+    "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+  }
+}

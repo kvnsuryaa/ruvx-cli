@@ -1,0 +1,26 @@
+{
+  "platform": "Linux-6.12.5-linuxkit-aarch64-with-glibc2.36",
+  "machine": "aarch64",
+  "python": "3.11.2",
+  "binary": "/target/release/ruvx",
+  "binary_sha256": "0fe1709ff3a9fa820da8a5373a0dd18ee5227e5ad786d49af2f30200a8bc8f6b",
+  "functional": [
+    "Git branch in status, unborn repository and automatic external branch refresh without inference",
+    "slash filtering, required argument, Tab completion, Escape/edit, 48x16 and help click without inference",
+    "Shift+Tab switches Plan/Build without sending or losing the draft",
+    "legacy/CSI-u Option+Delete, ignored Command+Delete, Ctrl+W/U and multiline prefix preservation without submission",
+    "connect wizard, hidden API key, private storage",
+    "per-model effort capability setup, mouse selection, persistence and wire parameter",
+    "multiline paste, Unicode, resize, single submission",
+    "fullscreen mouse drag auto-copy, Ctrl+C selection priority, wheel and keyboard scroll",
+    "large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage",
+    "one compact tool result without duplicate call-ID line; full ID and arguments in Detail",
+    "shell denied without process side effect",
+    "approved shell, recorded change, diff review",
+    "cancel active provider request",
+    "normal exit restores termios, bracketed paste, mouse capture and alternate screen",
+    "global model and effort on restart and concurrent other-project window; /new reloads latest default without inference",
+    "resume keeps session model without replay or overwriting global default; SIGTERM cleanup",
+    "ruvx branding and legacy config/data/model/credential directories remain usable without moving or replaying them"
+  ]
+}

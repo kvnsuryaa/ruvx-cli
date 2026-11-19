@@ -1,0 +1,16 @@
+{
+  "platform": "macOS arm64",
+  "binary": "/Users/macbook/.cargo/bin/ruvx",
+  "sha256": "f9e719d4de1931f203b4c882861b31e89372ba40ba0472519e15cd37c1680da3",
+  "unit_tests_passed": 91,
+  "integration_tests_passed": 12,
+  "clippy_all_targets_deny_warnings": true,
+  "rustfmt_config_check": true,
+  "release_installed": true,
+  "legacy_only_startup_ignores_invalid_legacy_config": true,
+  "sessions_use_ruvx_directory": true,
+  "legacy_files_unchanged": true,
+  "private_permissions_verified": true,
+  "terminal_restoration_verified": true,
+  "provider_requests": 0
+}

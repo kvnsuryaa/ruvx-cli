@@ -618,16 +618,37 @@ def functional(binary):
             assert json.loads(preference_file.read_text()) == {"profile": "saved", "model": "m"}, "Resume overwrote the global default"
             terminal.close(terminate=True)
             steps.append("resume keeps session model without replay or overwriting global default; SIGTERM cleanup")
-            # Existing installations keep their original directories and credentials.
-            for base in [config, data]:
-                (base / "ruvx").rename(base / "kovr")
+            # Legacy storage stays untouched; ruvx starts with its own fresh state.
+            cache = Path(env["XDG_CACHE_HOME"])
+            (cache / "ruvx").mkdir(parents=True)
+            (cache / "ruvx" / "inventory.json").write_text('{"legacy": true}\n')
+            legacy_roots = []
+            for base in [config, data, cache]:
+                legacy = base / "kovr"
+                (base / "ruvx").rename(legacy)
+                legacy_roots.append(legacy)
+
+            def legacy_snapshot():
+                return {path: (path.read_bytes() if path.is_file() else None,
+                               path.stat().st_mode & 0o777)
+                        for legacy in legacy_roots
+                        for path in [legacy, *legacy.rglob("*")]}
+
+            legacy_before = legacy_snapshot()
             terminal = Terminal(binary, workspace, env)
-            terminal.wait(lambda: "[saved/m]" in terminal.grid.text(), "model retained from legacy directories")
+            terminal.wait(lambda: "[/connect]" in terminal.grid.text(), "fresh ruvx onboarding with legacy storage present")
             assert "ruvx ·" in terminal.grid.text()
-            assert not (config / "ruvx").exists() and not (data / "ruvx").exists()
-            assert len(server.requests) == count
+            assert "[saved/m]" not in terminal.grid.text() and "[fixture/m]" not in terminal.grid.text()
+            assert not (config / "ruvx").exists(), "Legacy config or credentials were copied"
+            assert not (cache / "ruvx").exists(), "Legacy cache was copied"
+            assert not preference_file.exists(), "Legacy global model was copied"
+            fresh_events = events(data)
+            assert sum(e["kind"] == "session.created" for e in fresh_events) == 1
+            assert not any(e["kind"] == "model.selected" for e in fresh_events)
+            assert len(server.requests) == count, "Legacy storage triggered inference"
             terminal.close()
-            steps.append("ruvx branding and legacy config/data/model/credential directories remain usable without moving or replaying them")
+            assert legacy_snapshot() == legacy_before, "Legacy storage contents or permissions changed"
+            steps.append("fresh ruvx onboarding and session storage without importing legacy config, credentials, model or cache; legacy contents and permissions unchanged without inference")
         finally:
             for current_terminal in [terminal, other_terminal]:
                 if current_terminal is None or current_terminal.process.poll() is not None:

@@ -1,0 +1,147 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.ref_name }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Check tag and package versions
+        run: python3 scripts/release.py check-version "$RELEASE_TAG"
+      - name: Test release packaging
+        run: python3 -m unittest discover -s scripts -p 'test_release.py'
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.89.0
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  build:
+    needs: validate
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$RELEASE_TARGET"
+      - name: Tests
+        run: cargo test --locked --all-targets --target "$RELEASE_TARGET"
+      - name: Build release binary
+        run: cargo build --release --locked --target "$RELEASE_TARGET"
+      - name: Terminal acceptance and resource targets
+        run: >-
+          python3 scripts/verify_terminal.py
+          --binary "target/$RELEASE_TARGET/release/ruvx"
+          --benchmark --output "target/validation-$RELEASE_TARGET.json"
+      - name: Package release
+        run: >-
+          python3 scripts/release.py package "$RELEASE_TAG"
+          --target "$RELEASE_TARGET"
+          --binary "target/$RELEASE_TARGET/release/ruvx"
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-${{ matrix.target }}
+          path: target/dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+      - name: Upload terminal validation report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: validation-${{ matrix.target }}
+          path: target/validation-${{ matrix.target }}.json
+          if-no-files-found: error
+          overwrite: true
+
+  draft:
+    needs: [validate, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: release-*
+          path: target/dist
+          merge-multiple: true
+      - name: Check package completeness and generate checksums
+        run: |
+          python3 scripts/release.py checksums "$RELEASE_TAG"
+          cd target/dist
+          sha256sum --check SHA256SUMS
+      - name: Create or update draft release
+        run: |
+          if draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" != true ]]; then
+              echo "Release $RELEASE_TAG is already published; refusing to replace assets." >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" target/dist/*.tar.gz target/dist/SHA256SUMS --clobber
+          else
+            flags=(--verify-tag --draft --title "ruvx $RELEASE_TAG" --generate-notes)
+            if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
+              flags+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" target/dist/*.tar.gz target/dist/SHA256SUMS "${flags[@]}"
+          fi

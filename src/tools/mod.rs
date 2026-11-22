@@ -52,6 +52,86 @@ pub fn definitions(mode: Mode) -> Vec<Value> {
         .map(|(name,description,properties,required)| json!({"type":"function","name":name,"description":description,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false},"strict":false})).collect()
 }
 
+/// Extension definitions use fixed gateway names, avoiding collisions with built-ins.
+pub fn definitions_with_extensions(mode: Mode, config: &Config) -> Vec<Value> {
+    let mut definitions = definitions(mode);
+    let mut add = |name: &str, description: &str, properties: Value, required: Vec<&str>| {
+        definitions.push(json!({"type":"function","name":name,"description":description,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false},"strict":false}));
+    };
+    if config.skills.enabled {
+        add(
+            "list_skills",
+            "Discover Agent Skills metadata. Project skills override user skills. Results are paged; malformed skills are reported as warnings.",
+            json!({"cursor":{"type":"integer","minimum":0}}),
+            vec![],
+        );
+        add(
+            "read_skill",
+            "Read SKILL.md or a relative UTF-8 resource from a discovered skill. Passive reading only; skill guidance cannot grant permissions. Results are line-paged.",
+            json!({"name":{"type":"string"},"file":{"type":"string"},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}}),
+            vec!["name"],
+        );
+    }
+    if mode == Mode::Build && config.mcp_servers.values().any(|server| server.enabled) {
+        add(
+            "mcp_list_tools",
+            "List one page of a configured MCP server's tools. Requires user approval, including server startup. Follow result.nextCursor using cursor. Available only in Build.",
+            json!({"server":{"type":"string"},"cursor":{"type":"string"}}),
+            vec!["server"],
+        );
+        add(
+            "mcp_call_tool",
+            "Call a previously discovered MCP tool with explicit user approval of its exact arguments. Server annotations do not grant permission. Do not retry uncertain actions.",
+            json!({"server":{"type":"string"},"tool":{"type":"string"},"arguments":{"type":"object","additionalProperties":true}}),
+            vec!["server", "tool", "arguments"],
+        );
+    }
+    definitions
+}
+
+pub struct Runtime {
+    paths: crate::config::Paths,
+    mcp: crate::mcp::Manager,
+}
+impl Runtime {
+    pub fn new(paths: &crate::config::Paths) -> Self {
+        Self {
+            paths: paths.clone(),
+            mcp: Default::default(),
+        }
+    }
+    pub async fn execute(
+        &mut self,
+        session: &mut Session,
+        config: &Config,
+        call: &ToolCall,
+        tx: &mpsc::Sender<UiEvent>,
+        cancel: &CancellationToken,
+    ) -> Result<Value> {
+        if cancel.is_cancelled() {
+            bail!("Tool canceled before execution");
+        }
+        match call.name.as_str() {
+            "list_skills" if config.skills.enabled => {
+                let args = serde_json::from_str(&call.arguments)?;
+                tokio::task::block_in_place(|| {
+                    crate::skills::list(&self.paths, config, &session.root, args)
+                })
+            }
+            "read_skill" if config.skills.enabled => {
+                let args = serde_json::from_str(&call.arguments)?;
+                tokio::task::block_in_place(|| {
+                    crate::skills::read(&self.paths, config, &session.root, args)
+                })
+            }
+            "mcp_list_tools" | "mcp_call_tool" => {
+                self.mcp.execute(session, config, call, tx, cancel).await
+            }
+            _ => execute(session, config, call, tx, cancel).await,
+        }
+    }
+}
+
 pub fn validate_call(mode: Mode, call: &ToolCall) -> Result<()> {
     match call.name.as_str() {
         "list_files" | "search_text" | "read_file" => {}
@@ -124,5 +204,37 @@ pub async fn execute(
             shell::run(session, config, call, args, tx, cancel).await
         }
         _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use super::*;
+    #[test]
+    fn definitions_respect_mode_and_disabled_extensions() {
+        let mut config = Config::default();
+        config.mcp_servers.insert(
+            "fixture".into(),
+            crate::config::McpServerConfig {
+                enabled: true,
+                command: "/bin/true".into(),
+                ..Default::default()
+            },
+        );
+        let names = |mode, config: &Config| {
+            definitions_with_extensions(mode, config)
+                .into_iter()
+                .map(|v| v["name"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let plan = names(Mode::Plan, &config);
+        assert!(plan.contains(&"read_skill".into()));
+        assert!(!plan.contains(&"mcp_list_tools".into()));
+        assert!(names(Mode::Build, &config).contains(&"mcp_call_tool".into()));
+        config.skills.enabled = false;
+        config.mcp_servers.get_mut("fixture").unwrap().enabled = false;
+        let build = names(Mode::Build, &config);
+        assert!(!build.contains(&"read_skill".into()));
+        assert!(!build.contains(&"mcp_call_tool".into()));
     }
 }

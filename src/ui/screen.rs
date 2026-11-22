@@ -143,17 +143,23 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             0
         },
     );
+    let activity = app.activity_status();
+    let status_note = if activity.is_some() { "" } else { &app.status };
     let status = if app.selection.is_some() {
         let prefix = format!("[Effort: {}]", app.effort_label());
         let width = (prefix.width() as u16).min(status_width);
-        if width > 0 {
+        if width > 0 && app.active.is_none() {
             app.frame
                 .buttons
                 .push((Rect::new(1, 1, width, 1), Button::Command("/effort".into())));
         }
-        format!("{prefix} · {}", app.status)
+        if status_note.is_empty() {
+            prefix
+        } else {
+            format!("{prefix} · {status_note}")
+        }
     } else {
-        app.status.clone()
+        status_note.to_owned()
     };
     label(
         frame,
@@ -216,8 +222,9 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let composer_y = area.height.saturating_sub(input_height + 1);
     app.frame.composer = Rect::new(2, composer_y, area.width - 4, input_height);
     let dialog_y = composer_y.saturating_sub(choice_height + 1);
+    let activity_y = activity.as_ref().map(|_| dialog_y.saturating_sub(1).max(2));
     let body_y = 3.min(dialog_y);
-    let body_bottom = dialog_y.saturating_sub(1).max(body_y);
+    let body_bottom = activity_y.unwrap_or(dialog_y).saturating_sub(1).max(body_y);
     app.frame.transcript = Rect::new(2, body_y, area.width - 4, body_bottom - body_y);
     let heading = app
         .overlay
@@ -315,7 +322,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         }
     }
     app.frame.rows = rows;
-    if app.overlay.is_none() && !app.transcript.follow {
+    if app.overlay.is_none() && !app.transcript.follow && activity_y != Some(body_bottom) {
         let text = format!("[Latest · {} new]", app.transcript.new_blocks);
         let r = Rect::new(2, body_bottom, area.width - 4, 1);
         label(frame, r, text, Style::default().fg(accent));
@@ -346,6 +353,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 app.mode
             )
         }
+    } else if matches!(app.dialog, Dialog::Approval { .. }) {
+        app.activity
+            .approval_hint
+            .unwrap_or(app.dialog.label())
+            .to_owned()
     } else {
         app.dialog.label().to_owned()
     };
@@ -355,6 +367,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         hint,
         Style::default().fg(accent),
     );
+    if let (Some(activity), Some(y)) = (activity, activity_y) {
+        label(
+            frame,
+            Rect::new(1, y, area.width - 2, 1),
+            activity,
+            Style::default().fg(accent),
+        );
+    }
     if menu.is_none()
         && app.context_blocked
         && app.active.is_none()
@@ -529,6 +549,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_paste_editor(frame: &mut Frame, app: &mut App, area: Rect) {
+    let activity = app.activity_status();
     let editor = app.paste_editor.as_mut().unwrap();
     label(
         frame,
@@ -551,11 +572,25 @@ fn render_paste_editor(frame: &mut Frame, app: &mut App, area: Rect) {
             x += width + 1;
         }
     }
-    let rect = Rect::new(2, 3, area.width - 4, area.height.saturating_sub(4));
+    let rect = Rect::new(
+        2,
+        3,
+        area.width - 4,
+        area.height
+            .saturating_sub(if activity.is_some() { 5 } else { 4 }),
+    );
+    if let Some(activity) = activity {
+        label(
+            frame,
+            Rect::new(1, area.height - 2, area.width - 2, 1),
+            activity,
+            Style::default().fg(Color::Cyan),
+        );
+    }
     app.frame.paste_body = rect;
     match editor.display(rect.width as usize, rect.height as usize) {
         Ok((lines, cursor)) => {
-            for (row, text) in lines.into_iter().enumerate() {
+            for (row, text) in lines.into_iter().take(rect.height as usize).enumerate() {
                 label(
                     frame,
                     Rect::new(rect.x, rect.y + row as u16, rect.width, 1),
@@ -563,7 +598,9 @@ fn render_paste_editor(frame: &mut Frame, app: &mut App, area: Rect) {
                     Style::default(),
                 );
             }
-            if let Some((x, y)) = cursor {
+            if let Some((x, y)) = cursor
+                && rect.height > 0
+            {
                 frame.set_cursor_position((
                     rect.x + (x as u16).min(rect.width.saturating_sub(1)),
                     rect.y + y as u16,
@@ -588,6 +625,7 @@ fn render_paste_editor(frame: &mut Frame, app: &mut App, area: Rect) {
 impl Dialog {
     pub(super) fn choices(&self) -> Vec<(String, String)> {
         let values: Vec<(String, String)> = match self {
+            Self::Extension(setup) => setup.choices(),
             Self::Provider => vec![
                 ("1 OpenAI API".into(), "1".into()),
                 ("2 Continue with ChatGPT".into(), "2".into()),

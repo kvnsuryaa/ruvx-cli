@@ -6,7 +6,27 @@ ruvx memakai core agent sendiri, TUI fullscreen berfokus pada chat, dan koneksi 
 
 Proyek ini sebelumnya bernama Kovr. Command sekarang `ruvx` dan folder sumber `ruvx-cli`. Config, kredensial, session, pilihan model, dan cache selalu memakai direktori XDG bernama `ruvx`, terpisah dari direktori `kovr`. Data Kovr tetap utuh dan tidak dibaca atau disalin otomatis; hubungkan provider kembali melalui `/connect` pada config baru. Lokasi default dijelaskan di [panduan penyimpanan](docs/ruvx-v1/07-configuration-and-storage.md). Sesi tetap terkait path workspace kanonisnya; setelah folder proyek dipindah/di-rename, mulai sesi baru pada path baru. Arsip verifikasi lama mempertahankan nama/path/hash binary yang diuji saat itu. Verifikasi perubahan nama sebelum pemisahan penyimpanan: [macOS](docs/validation/rename-ruvx-macos-arm64.json), [Linux](docs/validation/rename-ruvx-linux-arm64.json).
 
-## Menjalankan
+## Instalasi dari release
+
+Unduh paket yang sesuai dengan OS/arsitektur dari [GitHub Releases](https://github.com/kvnsuryaa/ruvx-cli/releases), beserta `SHA256SUMS`. Binary siap pakai tidak memerlukan Rust. Target yang disiapkan: macOS Apple Silicon/Intel dan Linux ARM64/x86_64.
+
+Contoh untuk macOS Apple Silicon versi `0.1.0`, setelah release dipublikasikan:
+
+```sh
+shasum -a 256 --check --ignore-missing SHA256SUMS
+tar -xzf ruvx-v0.1.0-aarch64-apple-darwin.tar.gz
+mkdir -p "$HOME/.local/bin"
+install -m 755 ruvx-v0.1.0-aarch64-apple-darwin/ruvx "$HOME/.local/bin/ruvx"
+export PATH="$HOME/.local/bin:$PATH"
+ruvx --version
+ruvx /path/ke/proyek
+```
+
+Jalankan verifikasi checksum di direktori unduhan dan pastikan paket yang dipilih mendapat status `OK` sebelum ekstraksi. Di Linux gunakan `sha256sum --check --ignore-missing SHA256SUMS`. Simpan pengaturan PATH di konfigurasi shell agar tersedia pada terminal berikutnya. Paket Linux dibangun pada Ubuntu 22.04/glibc 2.35; distro lebih lama dan musl belum diverifikasi. Pengujian paket macOS memakai macOS 15. Binary macOS belum ditandatangani dengan Developer ID atau dinotariskan.
+
+Untuk maintainer, proses tag, build empat target, dan publikasi draft dijelaskan di [panduan release](docs/releasing.md).
+
+## Menjalankan dari source
 
 Gunakan Rust 1.89 atau lebih baru:
 
@@ -48,6 +68,8 @@ Pesan **USER** memakai background netral tanpa bingkai; jawaban **AI · ruvx** t
 
 Hasil tool tampil sekali, misalnya `read_file → ok [Detail]`; aktivitas berjalan ada di status dan call ID tersedia dalam Detail.
 
+Saat AI bekerja, indikator di bawah percakapan, tepat di atas area input, hanya menampilkan spinner dan empat informasi: `AI Working, 12s, 2 turns, 1530 total tokens`. Durasi, jumlah turn, dan total token berlaku untuk run aktif dan direset pada run berikutnya, termasuk `/continue`. Total token menjumlahkan usage setiap respons provider; jika `total_tokens` tidak ada, jumlah input dan output yang lengkap digunakan. Sebelum usage tersedia, atau bila ada turn tanpa usage lengkap, tampil `— total tokens`; angka ini bukan estimasi konteks. Indikator tetap bergerak ketika provider atau tool belum menghasilkan output. Menunggu persetujuan memakai label `Waiting for approval`, dan pembatalan memakai `Canceling`, dengan metrik ringkas yang sama. Petunjuk approval ada di dialog; `Ctrl+C cancel` tetap tersedia di footer. Setelah selesai atau gagal, spinner berhenti dan status kembali `ready`. Di editor paste, indikator juga berada di bawah, tepat di atas footer.
+
 Jika proyek berada di repository Git, kanan baris status menampilkan branch seperti `git: main`, dengan pembaruan otomatis sekitar dua detik. Worktree dan subfolder repository didukung; detached HEAD menampilkan hash pendek. Informasi ini dibaca dari metadata lokal tanpa menjalankan proses Git.
 
 Paste panjang muncul sebagai `[Paste 1 · N lines]`. Klik atau F2 untuk mengedit, Ctrl+S menyimpan, Escape membatalkan, dan Ctrl+D menghapus node di editor. Enter mengirim isi lengkap, bukan teks preview. Draft tidak memiliki batas ukuran tetap; pemeriksaan konteks gagal mempertahankan draft, dengan kontrol compaction/session baru yang tetap eksplisit.
@@ -80,13 +102,15 @@ Tools file membatasi path ke workspace dan mengecualikan data privat aplikasi. S
 
 ## Command dan input
 
-Ketik `/` untuk membuka menu command di atas input; `/m` memfilter `/model` dan `/mode`. Gunakan Up/Down atau wheel di atas menu untuk memilih, Enter/klik untuk menjalankan atau membuka pilihan, Tab untuk melengkapi tanpa menjalankan, dan Escape untuk menutup tanpa menghapus input. `/mode` dan `/resume` dilengkapi dengan spasi agar argumennya dapat diisi. Menu tidak mengeksekusi command selama AI bekerja; pilih lagi setelah selesai. Command yang tersedia sama dengan `/help`.
+Ketik `/` untuk membuka menu command di atas input; `/m` memfilter `/model`, `/mcp`, dan `/mode`. Gunakan Up/Down atau wheel di atas menu untuk memilih, Enter/klik untuk menjalankan atau membuka pilihan, Tab untuk melengkapi tanpa menjalankan, dan Escape untuk menutup tanpa menghapus input. `/mode` dan `/resume` dilengkapi dengan spasi agar argumennya dapat diisi. Menu tidak mengeksekusi command selama AI bekerja; pilih lagi setelah selesai. Command yang tersedia sama dengan `/help`.
 
 | Command/input | Kegunaan |
 | --- | --- |
 | `/help` | Daftar command dan shortcut |
 | `/connect`, `/disconnect`, `/model` | Provider, kredensial, dan model |
 | `/effort [default\|level]`, `/effort levels [...]` | Reasoning effort dan kapabilitas model aktif |
+| `/skills [add\|remove\|enable\|disable]` | Daftar skill dan pengelolaan lokasi skill lokal |
+| `/mcp`, `/mcp add`, `/mcp edit <id>`, `/mcp remove <id>`, `/mcp enable <id>`, `/mcp disable <id>` | Daftar dan konfigurasi MCP stdio tanpa menjalankan server |
 | `/mode plan`, `/mode build` | Berpindah mode ketika idle |
 | `/new`, `/sessions`, `/resume <id>` | Pengelolaan session |
 | `/compact` | Ringkasan konteks manual melalui model |
@@ -169,4 +193,9 @@ Fixture private key di `tests/fixtures/` adalah data publik khusus pengujian sig
 - [Kontrak provider dan autentikasi](docs/ruvx-v1/04-providers-and-auth.md)
 - [Roadmap dan gerbang penerimaan](docs/ruvx-v1/09-implementation-roadmap.md)
 
-MCP, skills, subagent, undo otomatis, headless, dan Windows native berada di luar cakupan v1.
+## Agent Skills dan MCP
+
+- **Agent Skills:** simpan `SKILL.md` dengan YAML frontmatter `name` dan `description` di `.agents/skills/<nama>/` proyek atau `~/.config/ruvx/skills/<nama>/` (mengikuti XDG), atau daftarkan folder lokal melalui `/skills add`. Metadata otomatis tersedia bagi agent; body dan resource dibaca saat diperlukan melalui `read_skill`. Katalog dibatasi 16 KiB; `list_skills` menyediakan paging untuk daftar lengkap. `/skills remove` hanya melepas lokasi tambahan, tanpa menghapus sumber. `/skills enable` dan `/skills disable` mengatur discovery global. Script tidak dijalankan otomatis dan skill tidak dapat memperluas izin.
+- **MCP stdio:** gunakan `/mcp add` untuk setup, `/mcp edit <id>` untuk mengubah parameter, serta `/mcp enable|disable|remove <id>` untuk mengelola server. Perubahan tersimpan di config global dan berlaku pada run berikutnya tanpa restart. `/mcp` menampilkan daftar tanpa memulai proses. Dalam Build, agent dapat melakukan discovery dan memanggil tool setelah approval eksplisit untuk setiap operasi. Server berhenti ketika run agent berakhir; outcome terputus memerlukan pemeriksaan dan acknowledgement, bukan replay otomatis.
+
+Lihat [panduan Agent Skills dan MCP](docs/skills-and-mcp.md) untuk contoh lengkap, environment, paging, protokol, dan batas keamanan. MCP HTTP, resources/prompts, installer skill, subagent, undo otomatis, headless, dan Windows native belum didukung.

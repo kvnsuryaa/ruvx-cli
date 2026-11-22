@@ -68,16 +68,15 @@ impl App {
         let revision = self.editor.revision;
         let session = self.session.take().unwrap();
         let config = self.config.clone();
+        let paths = self.paths.clone();
         let tx = self.tx.clone();
-        let cancel = CancellationToken::new();
-        self.active = Some(cancel.clone());
+        let cancel = self.begin_work("Preparing", "Checking message and model context");
         self.preflight = Some(Preflight {
             revision,
             snapshot: original,
             document,
         });
         self.context_blocked = false;
-        self.status = "Checking message and model context…".into();
         tokio::task::spawn_blocking(move || {
             let result = (|| -> Result<String> {
                 ensure!(
@@ -98,13 +97,14 @@ impl App {
                     let mut history: Vec<_> =
                         session.history()?.into_iter().map(|(_, m)| m).collect();
                     history.push(Message::user(content));
-                    let (instructions, _) = context::instructions(&session, &config, &history)?;
+                    let (instructions, _) =
+                        context::instructions(&session, &paths, &config, &history)?;
                     context::check_capacity(
                         profile,
                         &selection.model,
                         &history,
                         &instructions,
-                        &tools::definitions(session.mode),
+                        &tools::definitions_with_extensions(session.mode, &config),
                     )?;
                     ensure!(!cancel.is_cancelled(), "Preparation canceled");
                     let Some(Message::User { content }) = history.pop() else {
@@ -134,7 +134,7 @@ impl App {
             .active
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled);
-        self.active = None;
+        self.finish_work();
         self.session = Some(session);
         let Some(pending) = self.preflight.take() else {
             return Ok(());

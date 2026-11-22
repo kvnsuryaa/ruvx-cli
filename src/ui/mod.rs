@@ -1,8 +1,10 @@
+mod activity;
 mod clipboard;
 mod commands;
 mod composer;
 mod deletion;
 mod editor;
+mod extensions;
 mod git;
 mod paste_editor;
 mod preferences;
@@ -146,6 +148,7 @@ struct Draft {
 }
 enum Dialog {
     None,
+    Extension(extensions::Setup),
     Provider,
     ProfileName {
         kind: ProviderKind,
@@ -197,6 +200,7 @@ enum Dialog {
 impl Dialog {
     fn label(&self) -> &str {
         match self {
+            Self::Extension(setup) => setup.label(),
             Self::None => "Enter sends · Alt+Enter newline · /help · Ctrl+C cancel",
             Self::Provider => {
                 "Provider: 1 OpenAI API · 2 Continue with ChatGPT · 3 Custom compatible"
@@ -235,7 +239,7 @@ impl Dialog {
             Self::Acknowledge => {
                 "Inspect effects first. Type acknowledge to record uncertain outcomes without replay"
             }
-            Self::Approval { .. } => "Shell: type run to approve once, or deny / Escape to reject",
+            Self::Approval { .. } => "Type run to approve once, or deny / Escape to reject",
         }
     }
     fn masked(&self) -> bool {
@@ -259,6 +263,7 @@ struct App {
     dialog: Dialog,
     status: String,
     active: Option<CancellationToken>,
+    activity: activity::Activity,
     tx: mpsc::Sender<UiEvent>,
     lines: VecDeque<String>,
     transcript: Transcript,
@@ -345,6 +350,7 @@ impl App {
             dialog: Dialog::None,
             status: "ready".into(),
             active: None,
+            activity: activity::Activity::default(),
             tx,
             lines,
             transcript,
@@ -481,9 +487,7 @@ impl App {
             }
         }
         let session = self.session.take().unwrap();
-        let cancel = CancellationToken::new();
-        self.active = Some(cancel.clone());
-        self.status = "preparing…".into();
+        let cancel = self.begin_work("AI Working", "Preparing request");
         tokio::spawn(agent::start(
             session,
             self.paths.clone(),
@@ -544,9 +548,7 @@ impl App {
         let paths = self.paths.clone();
         let config = self.config.clone();
         let tx = self.tx.clone();
-        let cancel = CancellationToken::new();
-        self.active = Some(cancel.clone());
-        self.status = "loading models…".into();
+        let cancel = self.begin_work("Loading models", "Contacting provider");
         tokio::spawn(async move {
             let result = provider::discover(&paths, &config, &id, &profile, &cancel)
                 .await
@@ -558,9 +560,7 @@ impl App {
         let paths = self.paths.clone();
         let config = self.config.clone();
         let tx = self.tx.clone();
-        let cancel = CancellationToken::new();
-        self.active = Some(cancel.clone());
-        self.status = "waiting for ChatGPT sign-in…".into();
+        let cancel = self.begin_work("Signing in", "Waiting for ChatGPT sign-in");
         tokio::spawn(async move {
             let AuthConfig::Chatgpt { credential } = &profile.auth else {
                 return;
@@ -785,6 +785,8 @@ impl App {
                 ensure!(args.len() == 1, "Usage: /resume <session-id>");
                 self.switch_session(Some(args[0]))?;
             }
+            "/skills" => self.skills_command(&args, height)?,
+            "/mcp" => self.mcp_command(&args, height)?,
             "/diff" => {
                 let path = text.strip_prefix("/diff").unwrap().trim();
                 let output = tools::diff(
@@ -816,7 +818,9 @@ impl App {
             && self.editor.text.trim() == "run"
             && self.overlay.as_ref().is_some_and(|o| !o.view.bottom_seen)
         {
-            self.status = "Read the entire shell review: scroll down before approving".into();
+            self.status = "Read the entire operation review: scroll down before approving".into();
+            self.activity.approval_hint =
+                Some("Scroll down to read the entire review before approving");
             self.editor.take();
             return Ok(());
         }
@@ -825,6 +829,7 @@ impl App {
         {
             self.editor.take();
             self.status = "Choose Run once or Deny, or type run / deny".into();
+            self.activity.approval_hint = Some("Choose Run once or Deny");
             return Ok(());
         }
         self.overlay = None;
@@ -850,6 +855,13 @@ impl App {
                 } else {
                     self.editor.restore(snapshot.clone());
                     self.prepare_submission(snapshot)?;
+                }
+            }
+            Dialog::Extension(setup) => {
+                let retry = setup.clone();
+                if let Err(error) = self.submit_extension(setup, value, height) {
+                    self.dialog = Dialog::Extension(retry);
+                    return Err(error);
                 }
             }
             Dialog::Provider => {
@@ -1389,23 +1401,37 @@ impl App {
                 Err(error) => self.status = format!("Copy failed: {error}"),
             },
             UiEvent::Line(text) => self.line(text),
-            UiEvent::Status(status) => self.status = sanitize(&status),
+            UiEvent::Status(status) => {
+                self.status = sanitize(&status);
+            }
+            UiEvent::RunProgress {
+                turns,
+                total_tokens,
+            } => {
+                self.activity.turns = turns;
+                self.activity.total_tokens = total_tokens;
+            }
             UiEvent::Approval { review, respond } => {
                 self.suspended_paste_editor = self.paste_editor.take();
                 self.saved_draft = Some(self.editor.take_snapshot());
-                self.status = "waiting for shell approval".into();
+                self.status = "waiting for approval".into();
+                self.activity.approval_hint = None;
+                let title = if review.starts_with("MCP approval") {
+                    "MCP approval"
+                } else {
+                    "Shell approval"
+                };
                 self.page(review, Dialog::Approval { respond }, height);
                 if let Some(overlay) = &mut self.overlay {
-                    overlay.title = "Shell approval".into();
+                    overlay.title = title.into();
                 }
             }
             UiEvent::RunFinished { session, error } => {
                 self.mode = session.mode;
                 self.selection = session.selection.clone();
                 self.session = Some(*session);
-                self.active = None;
+                self.finish_work();
                 self.dialog = Dialog::None;
-                self.status = "ready".into();
                 self.resume_paste_editor();
                 self.overlay = None;
                 if let Some(draft) = self.saved_draft.take() {
@@ -1416,8 +1442,7 @@ impl App {
                 }
             }
             UiEvent::ConnectionFinished { id, profile, error } => {
-                self.active = None;
-                self.status = "ready".into();
+                self.finish_work();
                 if let Some(error) = error {
                     self.error(error);
                     if !self.config.providers.contains_key(&id) {
@@ -1433,8 +1458,7 @@ impl App {
                 }
             }
             UiEvent::ModelsFinished { id, result } => {
-                self.active = None;
-                self.status = "ready".into();
+                self.finish_work();
                 match result{Ok(models)=>{let count=models.len();let mut config=self.config.clone();if let Some(profile)=config.providers.get_mut(&id){profile.models.extend(models);}self.paths.save(&config)?;self.config=config;self.line(format!("Found {count} models for {id}. Use /model to choose; no inference request was sent."));},Err(error)=>self.error(format!("Model discovery: {error}. Configure exact model using /model {id} <model-id>."))}
             }
         }
@@ -1483,6 +1507,7 @@ pub async fn run(paths: Paths, config: Config, session: Session) -> Result<()> {
                     }
                 }
                 if app.drag_scroll(){dirty=true;}
+                if app.activity_tick(std::time::Instant::now()) {dirty=true;}
                 if dirty{app.flush_lines();screen.draw(&mut app)?;dirty=false;}
             },
             _=term.recv()=>{closing=true;app.cancel();},
@@ -1501,7 +1526,7 @@ pub async fn run(paths: Paths, config: Config, session: Session) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (tempfile::TempDir, App, mpsc::Receiver<UiEvent>) {
+    pub(super) fn fixture() -> (tempfile::TempDir, App, mpsc::Receiver<UiEvent>) {
         let temp = tempfile::tempdir().unwrap();
         let paths = Paths::at(&temp.path().join("state"));
         let root = temp.path().join("work");
@@ -1512,7 +1537,7 @@ mod tests {
         app.flush_lines();
         (temp, app, rx)
     }
-    fn render(app: &mut App, width: u16, height: u16) -> String {
+    pub(super) fn render(app: &mut App, width: u16, height: u16) -> String {
         let mut terminal =
             Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
         terminal.draw(|frame| screen::render(frame, app)).unwrap();
@@ -1720,7 +1745,7 @@ mod tests {
         let (_temp, mut app, _rx) = fixture();
         app.editor.set("/".into());
         let items = app.command_matches().unwrap();
-        assert_eq!(items.len(), 14);
+        assert_eq!(items.len(), 16);
         assert_eq!(items[0].name, "/help");
         assert!(!items.iter().any(|c| c.name == "/usage"));
         let help = commands::help();
@@ -1732,7 +1757,7 @@ mod tests {
                 .iter()
                 .map(|c| c.name)
                 .collect::<Vec<_>>(),
-            ["/model", "/mode"]
+            ["/model", "/mcp", "/mode"]
         );
         menu_key(&mut app, KeyCode::Esc);
         assert_eq!(app.editor.text, "/m");
@@ -1768,14 +1793,14 @@ mod tests {
         assert_eq!(app.editor.text, "/help ");
         app.editor.set("/m".into());
         menu_key(&mut app, KeyCode::Up);
-        assert_eq!(app.command_menu.selected, 1);
+        assert_eq!(app.command_menu.selected, 2);
         menu_key(&mut app, KeyCode::Down);
         assert_eq!(app.command_menu.selected, 0);
         menu_key(&mut app, KeyCode::Tab);
         assert_eq!(app.editor.text, "/model ");
         assert!(app.command_matches().is_none());
         assert!(matches!(app.dialog, Dialog::None));
-        app.editor.set("/m".into());
+        app.editor.set("/mo".into());
         menu_key(&mut app, KeyCode::Down);
         menu_key(&mut app, KeyCode::Enter);
         assert_eq!(app.editor.text, "/mode ");

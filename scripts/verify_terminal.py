@@ -28,6 +28,7 @@ import tempfile
 import termios
 import threading
 import time
+import tomllib
 import uuid
 
 
@@ -255,6 +256,13 @@ class Terminal:
         status = "".join(self.grid.cells[1]).split("git: ", 1)[0].strip()
         return status == "ready" or status.endswith("· ready")
 
+    def activity_row(self):
+        for index in range(self.grid.height - 2, self.grid.height // 2 - 1, -1):
+            text = "".join(self.grid.cells[index]).strip()
+            if text and ("\u2800" <= text[0] <= "\u28ff" or text.startswith("? Waiting for approval")):
+                return index, text
+        return None, ""
+
     def copies(self):
         return [base64.b64decode(value).decode() for value in re.findall(rb"\x1b\]52;c;([A-Za-z0-9+/=]+)\x07", self.output)]
 
@@ -349,7 +357,7 @@ def functional(binary):
             terminal.send("/")
             terminal.wait(lambda: "Commands ·" in terminal.grid.text(), "slash command menu")
             assert "/help" in terminal.grid.text() and "/model" in terminal.grid.text()
-            terminal.send("m")
+            terminal.send("mo")
             terminal.wait(lambda: "/model" in terminal.grid.text() and "/mode" in terminal.grid.text(), "filtered commands")
             terminal.send("\x1b[B\r")  # /mode needs an argument, so Enter only completes it.
             terminal.pump(0.2)
@@ -384,6 +392,59 @@ def functional(binary):
             terminal.pump(0.2)
             assert not server.requests, "Command navigation started inference"
             steps.append("slash filtering, required argument, Tab completion, Escape/edit, 48x16 and help click without inference")
+
+            # Configure extensions in Plan before any model is selected. No code is run.
+            skill = root / "shared skills" / "demo"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: demo\ndescription: PTY skill fixture\n---\nRead only when relevant.\n")
+            config_file = config / "ruvx" / "config.toml"
+
+            def extension_config():
+                return tomllib.loads(config_file.read_text())
+
+            terminal.enter("/skills add")
+            terminal.wait(lambda: "Local skill folder" in terminal.grid.text(), "skill location dialog")
+            terminal.enter(str(skill))
+            assert extension_config()["skills"]["paths"] == [str(skill.resolve())]
+            terminal.enter("/skills")
+            terminal.wait(lambda: "demo [custom]" in terminal.grid.text(), "registered skill without restart")
+            terminal.send("\x1b")
+            terminal.pump(.1)
+            terminal.enter("/skills disable")
+            assert extension_config()["skills"]["enabled"] is False
+            terminal.enter("/skills enable")
+            terminal.enter("/mcp add")
+            for value in ["fixture-tools", "/bin/sh", '["-c","touch MCP_CONFIG_SHOULD_NOT_RUN"]', '["PATH"]', "", "", ""]:
+                terminal.enter(value)
+            terminal.wait(lambda: "Save configuration" in terminal.grid.text(), "MCP configuration review")
+            assert "fixture-tools" not in extension_config().get("mcp_servers", {})
+            terminal.enter("save")
+            saved = extension_config()["mcp_servers"]["fixture-tools"]
+            assert saved["enabled"] and saved["timeout_seconds"] == 60 and saved["max_message_bytes"] == 1048576
+            terminal.enter("/mcp edit fixture-tools")
+            for value in ["", "[]", "[]", "15", "4096", "no", "save"]:
+                terminal.enter(value)
+            saved = extension_config()["mcp_servers"]["fixture-tools"]
+            assert saved["args"] == [] and saved["inherit_env"] == [] and saved["timeout_seconds"] == 15
+            assert saved["max_message_bytes"] == 4096 and saved["enabled"] is False
+            terminal.enter("/mcp enable fixture-tools")
+            assert extension_config()["mcp_servers"]["fixture-tools"]["enabled"] is True
+            terminal.enter("/mcp disable fixture-tools")
+            assert extension_config()["mcp_servers"]["fixture-tools"]["enabled"] is False
+            terminal.enter("/mcp remove fixture-tools")
+            assert "fixture-tools" not in extension_config().get("mcp_servers", {})
+            terminal.enter("/mcp add")
+            terminal.enter("canceled-setup")
+            terminal.send("\x1b")
+            terminal.pump(.1)
+            assert "canceled-setup" not in extension_config().get("mcp_servers", {})
+            terminal.enter("/skills remove")
+            terminal.enter("1")
+            assert extension_config()["skills"]["paths"] == [] and (skill / "SKILL.md").is_file()
+            assert not (workspace / "MCP_CONFIG_SHOULD_NOT_RUN").exists()
+            assert not server.requests and not any(e["kind"] == "run.started" for e in events(data))
+            steps.append("skill register/list/toggle/unregister and MCP add/review/edit/toggle/remove/cancel persist immediately in Plan without model inference, server startup or deleting source files")
+
             terminal.send("keep this draft\x1b[Z")
             terminal.wait(lambda: "[Build]" in terminal.grid.text(), "Shift+Tab changes Plan to Build")
             assert " · Build · " in "".join(terminal.grid.cells[-3]), "Composer lost the active mode"
@@ -530,6 +591,8 @@ def functional(binary):
             mark = len(terminal.output)
             terminal.enter("test denial")
             terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "shell review")
+            assert "Waiting for approval" in terminal.activity_row()[1]
+            assert "Waiting for approval" not in "".join(terminal.grid.cells[1])
             terminal.wait(lambda: "Run once" in terminal.grid.text(), "approval buttons")
             terminal.send("\x1b[Z")
             terminal.pump(0.1)
@@ -557,14 +620,18 @@ def functional(binary):
             assert not (workspace / "denied.txt").exists()
             steps.append("shell denied without process side effect")
 
-            server.replies.put((completion(calls=[("approved", "run_shell", {"command": "printf marker > result.txt"})]), 0))
-            server.replies.put((completion("BUILD_OK"), 0))
+            server.replies.put((completion(calls=[("approved", "run_shell", {"command": "sleep 1; printf marker > result.txt"})], usage={"prompt_tokens":10,"completion_tokens":5}), 0))
+            server.replies.put((completion("BUILD_OK", usage={"total_tokens":22}), .6))
             mark = len(terminal.output)
             terminal.enter("test approval")
             terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "second shell review")
             terminal.enter("run")
+            terminal.wait(lambda: "AI Working" in terminal.activity_row()[1], "bottom activity while a silent shell runs")
+            terminal.wait(lambda: "1 turn, 15 total tokens" in terminal.activity_row()[1], "reported token total during tool execution")
+            terminal.wait(lambda: "2 turns, 15 total tokens" in terminal.activity_row()[1], "cumulative counters during next provider turn")
             terminal.wait(lambda: "BUILD_OK" in terminal.grid.text(), "approved command result")
             terminal.wait(terminal.idle, "agent returns session and becomes ready")
+            assert terminal.activity_row()[0] is None
             assert (workspace / "result.txt").read_text() == "marker"
             terminal.enter("/diff")
             terminal.pump()
@@ -576,12 +643,23 @@ def functional(binary):
             server.replies.put((completion("SHOULD_NOT_FINISH"), 1.5))
             terminal.enter("cancel this request")
             terminal.wait(lambda: len(server.requests) > before, "active network request")
+            terminal.wait(lambda: "AI Working" in terminal.activity_row()[1], "bottom activity before provider response")
+            terminal.wait(lambda: re.search(r"AI Working, \d+s, 1 turn, — total tokens", terminal.activity_row()[1]), "compact run counters in bottom activity indicator")
+            assert "Waiting for AI response" not in terminal.activity_row()[1]
+            assert "AI Working" not in "".join(terminal.grid.cells[1])
+            assert terminal.activity_row()[0] < terminal.grid.height - 2
+            first_frame = terminal.activity_row()[1][0]
+            terminal.pump(.3)
+            assert terminal.activity_row()[1][0] != first_frame, "Activity indicator froze without provider events"
+            assert "Ctrl+C cancel" in terminal.grid.text()
             terminal.send("\x1b[Z")
             terminal.pump(0.1)
             assert "[Build]" in terminal.grid.text(), "Shift+Tab changed mode during active work"
             terminal.send("\x1b[99;5u")  # Enhanced Ctrl+C still cancels the active request.
             terminal.wait(lambda: any(e["kind"] == "run.stopped" and e["payload"].get("reason") == "canceled" for e in events(data)), "durable cancellation")
-            steps.append("cancel active provider request")
+            terminal.wait(terminal.idle, "activity stops after cancellation")
+            assert terminal.activity_row()[0] is None
+            steps.append("bottom activity above input animates during quiet provider/tool work; approval waits and cancellation are distinct; completion/cancellation stop the indicator")
             session_id = next(e["session_id"] for e in events(data) if e["kind"] == "session.created")
             terminal.close()
             steps.append("normal exit restores termios, bracketed paste, mouse capture and alternate screen")

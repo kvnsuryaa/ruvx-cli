@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 struct MockState {
     replies: Mutex<VecDeque<String>>,
     requests: Mutex<Vec<Value>>,
+    progress: Mutex<Vec<(u32, Option<u64>)>>,
 }
 async fn inference(
     State(state): State<Arc<MockState>>,
@@ -120,10 +121,19 @@ impl Fixture {
         session
     }
     fn reply(&self, text: &str, calls: Vec<(&str, &str, Value)>) {
+        let usage = (self.kind != ProviderKind::Compatible)
+            .then(|| json!({"input_tokens":10,"output_tokens":5}));
+        self.reply_usage(text, calls, usage);
+    }
+    fn reply_usage(&self, text: &str, calls: Vec<(&str, &str, Value)>, usage: Option<Value>) {
         let mut reply = String::new();
         if self.kind == ProviderKind::Compatible {
             let tool_calls:Vec<_>=calls.iter().enumerate().map(|(i,(id,name,args))|json!({"index":i,"id":id,"type":"function","function":{"name":name,"arguments":args.to_string()}})).collect();
-            reply.push_str(&format!("data: {}\n\n",json!({"choices":[{"index":0,"delta":{"content":text,"tool_calls":tool_calls},"finish_reason":if calls.is_empty(){"stop"}else{"tool_calls"}}]})));
+            let mut response = json!({"choices":[{"index":0,"delta":{"content":text,"tool_calls":tool_calls},"finish_reason":if calls.is_empty(){"stop"}else{"tool_calls"}}]});
+            if let Some(usage) = usage {
+                response["usage"] = usage;
+            }
+            reply.push_str(&format!("data: {response}\n\n"));
             reply.push_str("data: [DONE]\n\n");
         } else {
             let mut output = vec![];
@@ -137,7 +147,14 @@ impl Fixture {
             for (id, name, args) in calls {
                 output.push(json!({"type":"function_call","call_id":id,"name":name,"arguments":args.to_string()}));
             }
-            reply.push_str(&format!("data: {}\n\n",json!({"type":"response.completed","response":{"output":output,"usage":{"input_tokens":10,"output_tokens":5}}})));
+            let mut response = json!({"output":output});
+            if let Some(usage) = usage {
+                response["usage"] = usage;
+            }
+            reply.push_str(&format!(
+                "data: {}\n\n",
+                json!({"type":"response.completed","response":response})
+            ));
         }
         self.state.replies.lock().unwrap().push_back(reply);
     }
@@ -165,6 +182,16 @@ impl Fixture {
             .unwrap()
         {
             match event {
+                UiEvent::RunProgress {
+                    turns,
+                    total_tokens,
+                } => {
+                    self.state
+                        .progress
+                        .lock()
+                        .unwrap()
+                        .push((turns, total_tokens));
+                }
                 UiEvent::Approval { respond, .. } => {
                     let _ = respond.send(approvals.pop_front().expect("Unexpected approval"));
                 }
@@ -193,6 +220,46 @@ impl Fixture {
         task.await.unwrap();
         assert!(approvals.is_empty());
         finished.expect("Agent did not return its session")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn run_counters_accumulate_reported_usage_reset_and_preserve_unknown_totals() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        for missing in [None, Some(0), Some(1)] {
+            let f = Fixture::new(kind).await;
+            let first = (missing != Some(0))
+                .then(|| json!({"total_tokens":100,"input_tokens":10,"output_tokens":5}));
+            let second =
+                (missing != Some(1)).then(|| json!({"prompt_tokens":12,"completion_tokens":3}));
+            f.reply_usage("", vec![("files", "list_files", json!({}))], first);
+            f.reply_usage("Done", vec![], second);
+            let (session, error) = f
+                .run(f.session(), Action::Message("Inspect".into()), vec![])
+                .await;
+            assert!(error.is_none(), "{error:?}");
+            let first_total = (missing != Some(0)).then_some(100);
+            let final_total = missing.is_none().then_some(115);
+            assert_eq!(
+                *f.state.progress.lock().unwrap(),
+                vec![
+                    (1, None),
+                    (1, first_total),
+                    (2, first_total),
+                    (2, final_total)
+                ]
+            );
+            f.state.progress.lock().unwrap().clear();
+            f.reply_usage("Done again", vec![], Some(json!({"total_tokens":0})));
+            let (_, error) = f
+                .run(session, Action::Message("Another run".into()), vec![])
+                .await;
+            assert!(error.is_none(), "{error:?}");
+            assert_eq!(
+                *f.state.progress.lock().unwrap(),
+                vec![(1, None), (1, Some(0))]
+            );
+        }
     }
 }
 
@@ -633,6 +700,192 @@ async fn effort_reaches_every_tool_turn_compaction_and_can_return_to_default() {
             };
             assert_eq!(value.and_then(Value::as_str), expected);
         }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        let mut f = Fixture::new(kind).await;
+        f.config.mcp_servers.insert(
+            "test".into(),
+            ruvx::config::McpServerConfig {
+                enabled: true,
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "touch forbidden".into()],
+                ..Default::default()
+            },
+        );
+        let dir = f.root.join(".agents/skills/demo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), "---\nname: demo\ndescription: A test skill\n---\nUse only the existing permission controls.\n").unwrap();
+        f.reply("", vec![("s1", "list_skills", json!({}))]);
+        f.reply("", vec![("s2", "read_skill", json!({"name":"demo"}))]);
+        f.reply("", vec![("m1", "mcp_list_tools", json!({"server":"test"}))]);
+        f.reply("Done", vec![]);
+        let (session, error) = f
+            .run(
+                f.session(),
+                Action::Message("Inspect skills".into()),
+                vec![],
+            )
+            .await;
+        assert!(error.is_none(), "{error:?}");
+        assert!(!f.root.join("forbidden").exists());
+        let history = session.history().unwrap();
+        assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "read_skill" && content.contains("existing permission controls"))));
+        assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "mcp_list_tools" && content.contains("not allowed in Plan"))));
+        let requests = f.state.requests.lock().unwrap();
+        let definitions = requests[0]["tools"].to_string();
+        assert!(definitions.contains("list_skills"));
+        assert!(!definitions.contains("mcp_list_tools"));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uncertain_mcp_stops_agent_and_blocks_replay() {
+    let mut f = Fixture::new(ProviderKind::Compatible).await;
+    f.config.mcp_servers.insert(
+        "test".into(),
+        ruvx::config::McpServerConfig {
+            enabled: true,
+            command: "/bin/sh".into(),
+            args: vec!["-c".into(), "exit 0".into()],
+            ..Default::default()
+        },
+    );
+    let mut session = f.session();
+    session.set_mode(Mode::Build).unwrap();
+    f.reply("", vec![("m1", "mcp_list_tools", json!({"server":"test"}))]);
+    let (session, error) = f
+        .run(session, Action::Message("List tools".into()), vec![true])
+        .await;
+    assert!(error.unwrap().contains("uncertain"));
+    assert!(session.pending_tools.contains("m1"));
+    let (_session, error) = f
+        .run(session, Action::Message("Try again".into()), vec![])
+        .await;
+    assert!(error.unwrap().contains("uncertain outcomes"));
+    assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn automatic_skill_metadata_and_paged_mcp_work_in_build_for_both_providers() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        let mut f = Fixture::new(kind).await;
+        let skills = f.root.join("local skills/demo");
+        fs::create_dir_all(skills.join("references")).unwrap();
+        fs::write(skills.join("SKILL.md"), "---\nname: demo\ndescription: Use the fixture MCP echo tool\n---\nBODY_ONLY_AFTER_READ\n").unwrap();
+        fs::write(
+            skills.join("references/guide.md"),
+            "RESOURCE_ONLY_AFTER_READ\n",
+        )
+        .unwrap();
+        f.config.skills.paths.push(skills);
+        f.config.mcp_servers.insert(
+            "fixture".into(),
+            ruvx::config::McpServerConfig {
+                enabled: true,
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), include_str!("fixtures/mcp-stdio.sh").into()],
+                ..Default::default()
+            },
+        );
+        f.reply("", vec![("skill", "read_skill", json!({"name":"demo"}))]);
+        f.reply(
+            "",
+            vec![(
+                "resource",
+                "read_skill",
+                json!({"name":"demo","file":"references/guide.md"}),
+            )],
+        );
+        f.reply(
+            "",
+            vec![("list", "mcp_list_tools", json!({"server":"fixture"}))],
+        );
+        f.reply(
+            "",
+            vec![(
+                "next",
+                "mcp_list_tools",
+                json!({"server":"fixture","cursor":"page2"}),
+            )],
+        );
+        f.reply(
+            "",
+            vec![(
+                "echo",
+                "mcp_call_tool",
+                json!({"server":"fixture","tool":"echo","arguments":{"text":"hello"}}),
+            )],
+        );
+        f.reply("Done", vec![]);
+        let mut session = f.session();
+        session.set_mode(Mode::Build).unwrap();
+        let (session, error) = f
+            .run(
+                session,
+                Action::Message("Use the available skill and MCP".into()),
+                vec![true, true, true],
+            )
+            .await;
+        assert!(error.is_none(), "{error:?}");
+        assert!(session.pending_tools.is_empty());
+        let history = session.history().unwrap();
+        assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "mcp_call_tool" && content.contains("fixture result"))));
+        {
+            let requests = f.state.requests.lock().unwrap();
+            let first = requests[0].to_string();
+            assert!(first.contains("Use the fixture MCP echo tool"));
+            assert!(!first.contains("BODY_ONLY_AFTER_READ"));
+            assert!(!first.contains("RESOURCE_ONLY_AFTER_READ"));
+            assert!(requests[1].to_string().contains("BODY_ONLY_AFTER_READ"));
+            assert!(requests[2].to_string().contains("RESOURCE_ONLY_AFTER_READ"));
+        }
+        let trace = fs::read_to_string(f.root.join("server.requests")).unwrap();
+        let messages: Vec<Value> = trace
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m["method"] == "initialize")
+                .count(),
+            1
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["method"] == "notifications/initialized")
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["method"] == "tools/list" && m["params"]["cursor"] == "page2")
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["id"] == "ping" && m["result"].is_object())
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["id"] == "sampling" && m["error"]["code"] == -32601)
+        );
+        let pid: i32 = fs::read_to_string(f.root.join("server.pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        for _ in 0..100 {
+            if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err());
     }
 }
 

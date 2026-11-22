@@ -9,6 +9,11 @@ pub struct Usage {
     pub reasoning: Option<u64>,
 }
 impl Usage {
+    /// Prefer the provider total, or sum complete input/output aggregates only.
+    pub fn total_tokens(&self) -> Option<u64> {
+        self.total.or_else(|| self.input?.checked_add(self.output?))
+    }
+
     pub fn from_value(value: &Value) -> Self {
         Self {
             input: value["input_tokens"]
@@ -57,5 +62,26 @@ mod tests {
             "Tokens · input 12 · output 0"
         );
         assert_eq!(Usage::from_value(&json!({})).label(), "Tokens");
+    }
+
+    #[test]
+    fn totals_require_complete_counts_and_never_double_count_nested_details() {
+        for (value, expected) in [
+            (
+                json!({"total_tokens":42,"input_tokens":10,"output_tokens":5}),
+                Some(42),
+            ),
+            (
+                json!({"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":7},"output_tokens_details":{"reasoning_tokens":3}}),
+                Some(15),
+            ),
+            (json!({"prompt_tokens":12,"completion_tokens":0}), Some(12)),
+            (json!({"total_tokens":0}), Some(0)),
+            (json!({"input_tokens":12}), None),
+            (json!({}), None),
+            (json!({"input_tokens":u64::MAX,"output_tokens":1}), None),
+        ] {
+            assert_eq!(Usage::from_value(&value).total_tokens(), expected);
+        }
     }
 }

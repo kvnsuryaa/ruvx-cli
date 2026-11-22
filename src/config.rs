@@ -100,6 +100,8 @@ pub struct Config {
     pub shell: ShellConfig,
     pub network: NetworkConfig,
     pub providers: BTreeMap<String, Profile>,
+    pub skills: SkillsConfig,
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -111,9 +113,52 @@ impl Default for Config {
             shell: ShellConfig::default(),
             network: NetworkConfig::default(),
             providers: BTreeMap::new(),
+            skills: SkillsConfig::default(),
+            mcp_servers: BTreeMap::new(),
         }
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SkillsConfig {
+    pub enabled: bool,
+    /// Additional local skills or one-level collections, in increasing priority.
+    pub paths: Vec<PathBuf>,
+}
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            paths: Vec::new(),
+        }
+    }
+}
+
+/// Only global user configuration may define executable MCP servers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpServerConfig {
+    pub enabled: bool,
+    pub command: PathBuf,
+    pub args: Vec<String>,
+    /// Names of environment variables to inherit, never literal secret values.
+    pub inherit_env: Vec<String>,
+    pub timeout_seconds: u64,
+    pub max_message_bytes: usize,
+}
+impl Default for McpServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            command: PathBuf::new(),
+            args: Vec::new(),
+            inherit_env: vec!["PATH".into(), "HOME".into()],
+            timeout_seconds: 60,
+            max_message_bytes: 1024 * 1024,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AgentConfig {
@@ -357,6 +402,32 @@ impl Config {
                 && self.network.request_timeout_seconds > 0,
             "Network timeouts must be positive"
         );
+        ensure!(self.skills.paths.iter().all(|path| path.is_absolute()
+            && !path.as_os_str().as_encoded_bytes().contains(&0)),
+            "Skill paths must be absolute and must not contain NUL");
+        for (id, server) in &self.mcp_servers {
+            ensure!(valid_id(id), "Invalid MCP server ID");
+            ensure!(
+                server.command.is_absolute()
+                    && !server.command.as_os_str().as_encoded_bytes().contains(&0)
+                    && server.args.iter().all(|arg| !arg.contains('\0')),
+                "MCP command must be absolute and command/args must not contain NUL"
+            );
+            ensure!(
+                (1..=600).contains(&server.timeout_seconds)
+                    && (256..=16 * 1024 * 1024).contains(&server.max_message_bytes),
+                "MCP timeout must be 1..600 seconds and message limit 256..16777216 bytes"
+            );
+            for name in &server.inherit_env {
+                ensure!(
+                    !name.is_empty()
+                        && name.chars().enumerate().all(|(i, c)| {
+                            c == '_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit())
+                        }),
+                    "Invalid MCP environment variable name"
+                );
+            }
+        }
         for (id, profile) in &self.providers {
             ensure!(valid_id(id), "Invalid provider profile ID");
             let url = validate_url(profile.base_url())?;
@@ -412,6 +483,33 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extensions_are_backward_compatible_and_validate_commands() {
+        let mut config: Config = toml::from_str("schema_version = 1\n").unwrap();
+        assert!(config.skills.enabled);
+        assert!(config.skills.paths.is_empty());
+        assert!(config.mcp_servers.is_empty());
+        config.skills.paths = vec!["relative".into()];
+        assert!(config.validate().is_err());
+        config.skills.paths = vec!["/absolute/skill collection".into()];
+        config.mcp_servers.insert(
+            "local".into(),
+            McpServerConfig {
+                command: "/usr/bin/true".into(),
+                enabled: true,
+                ..Default::default()
+            },
+        );
+        config.validate().unwrap();
+        let roundtrip: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        roundtrip.validate().unwrap();
+        assert_eq!(roundtrip.skills.paths, config.skills.paths);
+        config.mcp_servers.get_mut("local").unwrap().command = "relative".into();
+        assert!(config.validate().is_err());
+        config.mcp_servers.get_mut("local").unwrap().command = "/usr/bin/true".into();
+        config.mcp_servers.get_mut("local").unwrap().inherit_env = vec!["BAD=VALUE".into()];
+        assert!(config.validate().is_err());
+    }
     #[test]
     fn storage_uses_ruvx_even_when_only_legacy_directories_exist() {
         let temp = tempfile::tempdir().unwrap();

@@ -2,6 +2,8 @@
 
 Agent ruvx bekerja melalui lima tools bawaan. Model meminta tindakan; dispatcher menentukan apakah tindakan valid dan diizinkan. Aturan mode dan persetujuan tetap berlaku walaupun instruksi repo, respons provider, atau hasil tool meminta sebaliknya.
 
+Ekstensi menambahkan `list_skills`/`read_skill` untuk skill lokal pasif serta `mcp_list_tools`/`mcp_call_tool` untuk MCP stdio. Metadata skill masuk ke konteks secara otomatis dengan batas 16 KiB; body/resource dibaca sesuai kebutuhan. MCP hanya tersedia dalam Build dan setiap operasi, termasuk startup/discovery, memerlukan approval. Pengelolaan `/skills` dan `/mcp` saat idle hanya mengubah konfigurasi atas tindakan pengguna; tidak menjalankan model atau server. Lihat [panduan Agent Skills dan MCP](../skills-and-mcp.md) untuk command dan kontrak lengkap.
+
 ## Siklus satu run
 
 1. Catat pesan pengguna, mode, profil/model, dan batas putaran pada awal run.
@@ -21,6 +23,8 @@ Satu putaran dihitung ketika request generasi mulai dikirim. Model discovery, lo
 | Tindakan | Plan | Build |
 | --- | --- | --- |
 | List, search, read | Langsung | Langsung |
+| Metadata dan pembacaan skill lokal | Langsung | Langsung |
+| Operasi MCP, termasuk discovery | Ditolak | Persetujuan per operasi |
 | Patch file proyek | Ditolak | Langsung setelah validasi |
 | Shell apa pun | Ditolak | Persetujuan per command |
 | Mengubah mode | Hanya intent pengguna saat idle | Hanya intent pengguna saat idle |

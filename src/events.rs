@@ -24,6 +24,11 @@ pub enum UiEvent {
     ClipboardRequest(String),
     ClipboardFinished(Result<Option<String>, String>),
     Status(String),
+    /// Counters for the active run. None means complete token usage is unavailable.
+    RunProgress {
+        turns: u32,
+        total_tokens: Option<u64>,
+    },
     Approval {
         review: String,
         respond: oneshot::Sender<bool>,

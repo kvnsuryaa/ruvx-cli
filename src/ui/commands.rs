@@ -40,6 +40,18 @@ pub(super) const COMMANDS: &[Command] = &[
         required: false,
     },
     Command {
+        name: "/skills",
+        args: "[add|remove|enable|disable]",
+        description: "List Agent Skills and manage local discovery locations",
+        required: false,
+    },
+    Command {
+        name: "/mcp",
+        args: "[add|edit|remove|enable|disable] [id]",
+        description: "List and configure MCP servers without starting them",
+        required: false,
+    },
+    Command {
         name: "/mode",
         args: "plan|build",
         description: "Change mode while idle",

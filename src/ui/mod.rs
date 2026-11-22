@@ -814,6 +814,12 @@ impl App {
         Ok(())
     }
     fn submit(&mut self, height: u16) -> Result<()> {
+        if self.active.is_some() && matches!(self.dialog, Dialog::None) {
+            if !self.editor.text.trim().is_empty() || !self.editor.pastes.is_empty() {
+                self.activity.draft_waiting = true;
+            }
+            return Ok(());
+        }
         if matches!(self.dialog, Dialog::Approval { .. })
             && self.editor.text.trim() == "run"
             && self.overlay.as_ref().is_some_and(|o| !o.view.bottom_seen)
@@ -835,18 +841,20 @@ impl App {
         self.overlay = None;
         self.gesture = None;
         self.focus = 0;
+        self.focused_button = None;
         let snapshot = self.editor.snapshot();
         let text = self.editor.take();
         let value = text.trim();
         let dialog = std::mem::replace(&mut self.dialog, Dialog::None);
+        // The event loop can process multiple clicks before rendering again.
+        // Retire controls belonging to the dialog that was just submitted.
+        self.frame
+            .buttons
+            .retain(|(_, button)| !matches!(button, screen::Button::Choice(_)));
         match dialog {
             Dialog::None => {
                 if value.is_empty() {
                     return Ok(());
-                }
-                if self.active.is_some() {
-                    self.editor.restore(snapshot);
-                    bail!("Work is active. Your draft is preserved; Ctrl+C cancels.");
                 }
                 if snapshot.pastes.is_empty() && value.starts_with('/') && !value.starts_with("//")
                 {
@@ -2034,6 +2042,91 @@ mod tests {
             .unwrap();
         assert!(!rx.await.unwrap());
     }
+    #[test]
+    fn enter_during_active_work_preserves_the_draft_without_an_error_or_cancellation() {
+        let (_temp, mut app, mut rx) = fixture();
+        let cancel = app.begin_work("AI Working", "Running git push");
+        app.paste(&"follow-up instruction\n".repeat(20)).unwrap();
+        app.editor.insert("keep this suffix");
+        let original = app.editor.snapshot();
+        for _ in 0..2 {
+            app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40)
+                .expect(
+                    "Enter must preserve the pending draft while the approved operation continues",
+                );
+        }
+        assert_eq!(app.editor.text, original.text);
+        assert_eq!(app.editor.cursor, original.cursor);
+        assert_eq!(app.editor.pastes.len(), original.pastes.len());
+        assert!(!cancel.is_cancelled());
+        assert!(app.active.is_some());
+        assert!(rx.try_recv().is_err());
+        let view = render(&mut app, 100, 40);
+        assert!(view.contains("AI is still working"));
+        assert!(!view.contains("Error: Work is active"));
+        let session = app.session.take().unwrap();
+        app.event(
+            UiEvent::RunFinished {
+                session: Box::new(session),
+                error: None,
+            },
+            40,
+        )
+        .unwrap();
+        assert_eq!(app.editor.text, original.text);
+        assert_eq!(app.editor.pastes.len(), original.pastes.len());
+        assert!(!render(&mut app, 100, 40).contains("AI is still working"));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn repeated_approval_click_preserves_draft_and_keeps_the_operation_running() {
+        let (_temp, mut app, _rx) = fixture();
+        let cancel = app.begin_work("AI Working", "Running git push");
+        app.editor.set("follow-up draft".into());
+        let (respond, mut answer) = oneshot::channel();
+        app.event(
+            UiEvent::Approval {
+                review: "Shell approval · git push fixture".into(),
+                respond,
+            },
+            40,
+        )
+        .unwrap();
+        render(&mut app, 100, 40);
+        let rect = app
+            .frame
+            .buttons
+            .iter()
+            .find(|(_, button)| matches!(button, screen::Button::Choice(value) if value == "run"))
+            .unwrap()
+            .0;
+        // A burst of mouse events is handled before the next terminal redraw.
+        for _ in 0..2 {
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.mouse(
+                    MouseEvent {
+                        kind,
+                        column: rect.x,
+                        row: rect.y,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    40,
+                )
+                .expect(
+                    "A repeated approval click must not submit a new prompt while work is active",
+                );
+            }
+        }
+        assert!(answer.try_recv().unwrap());
+        assert!(!cancel.is_cancelled());
+        assert!(app.active.is_some());
+        assert_eq!(app.editor.text, "follow-up draft");
+    }
+
     #[test]
     fn long_shell_review_must_be_read_before_run() {
         let (_temp, mut app, _rx) = fixture();

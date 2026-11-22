@@ -743,6 +743,76 @@ def functional(binary):
     return steps
 
 
+def git_push_workflow(binary):
+    """Real commit/push to a disposable local bare remote; no external remote is used."""
+    git = shutil.which("git")
+    if git is None:
+        return {"skipped": "git is not installed"}
+    server = Provider()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    terminal = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="ruvx-git-pty-") as directory:
+            root = Path(directory)
+            workspace, config, data, env = fixture_env(root, server.server_port)
+            env = {key: value for key, value in env.items() if not key.startswith("GIT_")}
+            env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0")
+            remote = root / "local-remote.git"
+            for args in [
+                [git, "-c", "init.templateDir=", "init", "--quiet", "--initial-branch=main"],
+                [git, "-c", "init.templateDir=", "init", "--quiet", "--bare", str(remote)],
+                [git, "remote", "add", "origin", str(remote)],
+            ]:
+                subprocess.run(args, cwd=workspace, env=env, check=True, capture_output=True)
+            (workspace / "file.txt").write_text("fixture content\n")
+            hook = workspace / ".git" / "hooks" / "pre-push"
+            hook.parent.mkdir(exist_ok=True)
+            hook.write_text("#!/bin/sh\nprintf started > .git/push-started\nsleep 1\n")
+            hook.chmod(0o700)
+            terminal = Terminal(binary, workspace, env)
+            terminal.enter("/model fixture m")
+            terminal.enter("/mode build")
+            commit = "git add file.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false commit -m 'fixture commit'"
+            server.replies.put((completion(calls=[("git-commit", "run_shell", {"command": commit})]), 0))
+            server.replies.put((completion(calls=[("git-push", "run_shell", {"command": "git push origin main"})]), 0))
+            server.replies.put((completion("LOCAL_PUSH_OK"), 0))
+            terminal.enter("Commit and push to the local test remote")
+            terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "commit review")
+            x, y = terminal.grid.locate("Run once")
+            # Both clicks arrive in the same input burst, before a new frame.
+            click = f"\x1b[<0;{x + 1};{y + 1}M\x1b[<0;{x + 1};{y + 1}m"
+            terminal.send(click * 2)
+            terminal.wait(lambda: "Shell approval" in terminal.grid.text() and "git push origin main" in terminal.grid.text(), "push review after repeated commit approval click")
+            terminal.enter("run")
+            terminal.wait(lambda: (workspace / ".git" / "push-started").exists(), "push starts and enters pre-push hook")
+            terminal.enter("follow-up draft")
+            terminal.wait(lambda: "AI is still working" in terminal.grid.text(), "non-error feedback while push continues")
+            terminal.wait(lambda: "LOCAL_PUSH_OK" in terminal.grid.text(), "push completes despite Enter during active work")
+            terminal.wait(terminal.idle, "Git workflow returns to ready")
+            assert b"Error: Work is active" not in terminal.output
+            assert b"Run canceled; completed changes" not in terminal.output
+            assert any("follow-up draft" in "".join(row) for row in terminal.grid.cells[-3:])
+            assert len(server.requests) == 3, "Draft was submitted or a Git action was repeated"
+            local_head = subprocess.check_output([git, "rev-parse", "HEAD"], cwd=workspace, env=env).strip()
+            remote_head = subprocess.check_output([git, "--git-dir", str(remote), "rev-parse", "refs/heads/main"], env=env).strip()
+            assert local_head == remote_head, "Local commit did not reach the disposable remote"
+            assert subprocess.check_output([git, "rev-list", "--count", "HEAD"], cwd=workspace, env=env).strip() == b"1"
+            approvals = [e for e in events(data) if e["kind"] == "approval.resolved"]
+            assert len(approvals) == 2 and all(e["payload"]["approved"] for e in approvals)
+            terminal.close()
+            return {"local_commit_and_push": "passed", "repeated_approval_click": "ignored", "enter_during_push": "draft preserved; push continued", "external_remotes_used": False}
+    finally:
+        if terminal is not None and terminal.process.poll() is None:
+            try:
+                os.kill(terminal.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            terminal.process.kill()
+            terminal.process.wait()
+        server.shutdown()
+        server.server_close()
+
+
 def benchmark(binary):
     samples = []
     idle_rss = []
@@ -947,7 +1017,7 @@ def main():
     report = {"platform": platform.platform(), "machine": platform.machine(),
               "python": platform.python_version(), "binary": str(binary),
               "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-              "functional": functional(binary)}
+              "functional": functional(binary), "git_workflow": git_push_workflow(binary)}
     if args.benchmark:
         report["performance"] = benchmark(binary)
         report["load_profile"] = load_profile(binary)

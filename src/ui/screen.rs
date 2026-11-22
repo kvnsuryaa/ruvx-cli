@@ -335,6 +335,11 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
             "Commands · Up/Down selects · Enter opens · Tab completes · Esc closes"
         }
         .to_owned()
+    } else if matches!(app.dialog, Dialog::None)
+        && app.active.is_some()
+        && app.activity.draft_waiting
+    {
+        "AI is still working; draft kept. Send again when ready.".to_owned()
     } else if matches!(app.dialog, Dialog::None) {
         let name = app.selection.as_ref().map_or(model.as_str(), |selection| {
             app.config
@@ -716,8 +721,17 @@ impl App {
             }
             Button::CommandChoice(name) => self.choose_command(&name, false, height)?,
             Button::Choice(value) => {
-                self.editor.set(value);
-                self.submit(height)?;
+                // Input can contain several clicks before the next frame. A choice
+                // from the previous dialog must not overwrite a restored draft.
+                if self
+                    .dialog
+                    .choices()
+                    .iter()
+                    .any(|(_, current)| current == &value)
+                {
+                    self.editor.set(value);
+                    self.submit(height)?;
+                }
             }
             Button::Detail(id) => {
                 let text = self.view().detail_text(id)?;

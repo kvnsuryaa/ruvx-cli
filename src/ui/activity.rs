@@ -10,6 +10,7 @@ pub(super) struct Activity {
     pub turns: u32,
     pub total_tokens: Option<u64>,
     pub approval_hint: Option<&'static str>,
+    pub draft_waiting: bool,
     last_frame: Option<u128>,
 }
 
@@ -27,6 +28,7 @@ impl Activity {
             turns: 0,
             total_tokens: None,
             approval_hint: None,
+            draft_waiting: false,
             last_frame: None,
         }
     }

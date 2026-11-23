@@ -44,7 +44,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     io::{self, Write},
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -449,6 +449,9 @@ impl App {
         }
         self.overlay = None;
         self.gesture = None;
+        if matches!(self.dialog, Dialog::Approval { .. }) {
+            self.activity.resume(Instant::now());
+        }
         if let Some(token) = &self.active {
             token.cancel();
             self.status = "canceling…".into();
@@ -882,8 +885,8 @@ impl App {
             && !matches!(self.editor.text.trim(), "run" | "deny")
         {
             self.editor.take();
-            self.status = "Choose Run once or Deny, or type run / deny".into();
-            self.activity.approval_hint = Some("Choose Run once or Deny");
+            self.status = "Choose Accept or Deny, or type run / deny".into();
+            self.activity.approval_hint = Some("Choose Accept or Deny");
             return Ok(());
         }
         self.overlay = None;
@@ -1139,6 +1142,7 @@ impl App {
                 );
             }
             Dialog::Approval { respond } => {
+                self.activity.resume(Instant::now());
                 self.resume_paste_editor();
                 if value == "run" {
                     let _ = respond.send(true);
@@ -1362,6 +1366,9 @@ impl App {
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => self.editor.insert("\n"),
             KeyCode::Enter => self.submit(height)?,
             KeyCode::Esc => {
+                if matches!(self.dialog, Dialog::Approval { .. }) {
+                    self.activity.resume(Instant::now());
+                }
                 self.overlay = None;
                 self.gesture = None;
                 self.resume_paste_editor();
@@ -1486,6 +1493,8 @@ impl App {
                 self.activity.total_tokens = total_tokens;
             }
             UiEvent::Approval { review, respond } => {
+                self.activity.pause(Instant::now());
+                self.focused_button = None;
                 self.suspended_paste_editor = self.paste_editor.take();
                 self.saved_draft = Some(self.editor.take_snapshot());
                 self.status = "waiting for approval".into();
@@ -2102,7 +2111,7 @@ mod tests {
         assert_eq!(app.editor.text, "draft 中🙂");
     }
     #[tokio::test]
-    async fn shell_defaults_to_deny_and_drag_never_approves() {
+    async fn shell_defaults_to_accept_and_drag_never_approves() {
         let (_temp, mut app, _rx) = fixture();
         let (tx, mut rx) = oneshot::channel();
         app.event(
@@ -2143,7 +2152,46 @@ mod tests {
         ));
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40)
             .unwrap();
-        assert!(!rx.await.unwrap());
+        assert!(rx.await.unwrap());
+    }
+    #[test]
+    fn approval_starts_on_accept_above_deny_and_navigation_can_reject() {
+        let (_temp, mut app, _rx) = fixture();
+        for review in ["Shell approval · fixture", "MCP approval · fixture"] {
+            let (respond, mut answer) = oneshot::channel();
+            // A new confirmation must not inherit another dialog's focus.
+            app.focus = 1;
+            app.focused_button = Some(screen::Button::Choice("deny".into()));
+            app.event(
+                UiEvent::Approval {
+                    review: review.into(),
+                    respond,
+                },
+                40,
+            )
+            .unwrap();
+            let view = render(&mut app, 100, 40);
+            assert_eq!(app.focus, 0);
+            assert!(app.focused_button.is_none());
+            assert!(view.contains("> Accept"));
+            assert!(view.find("Accept").unwrap() < view.find("Deny").unwrap());
+            let choice_row = |value: &str| {
+                app.frame
+                    .buttons
+                    .iter()
+                    .find(|(_, button)| matches!(button, screen::Button::Choice(v) if v == value))
+                    .unwrap()
+                    .0
+                    .y
+            };
+            assert!(choice_row("run") < choice_row("deny"));
+            app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), 40)
+                .unwrap();
+            assert!(render(&mut app, 100, 40).contains("> Deny"));
+            app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40)
+                .unwrap();
+            assert!(!answer.try_recv().unwrap());
+        }
     }
     #[test]
     fn enter_during_active_work_preserves_the_draft_without_an_error_or_cancellation() {
@@ -2243,8 +2291,8 @@ mod tests {
         )
         .unwrap();
         render(&mut app, 100, 40);
-        app.editor.set("run".into());
-        app.submit(40).unwrap();
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40)
+            .unwrap();
         assert!(matches!(
             rx.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
@@ -2252,8 +2300,8 @@ mod tests {
         assert!(app.overlay.is_some());
         app.view().bottom();
         render(&mut app, 100, 40);
-        app.editor.set("run".into());
-        app.submit(40).unwrap();
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40)
+            .unwrap();
         assert!(rx.try_recv().unwrap());
     }
     #[test]

@@ -141,7 +141,7 @@ Resume memulihkan mode session yang tersimpan dan menampilkannya jelas. `/new` s
 
 Sebelum setiap eksekusi, tampilkan command lengkap, cwd, dan timeout. Command multiline atau panjang masuk ke area review yang dapat digulir; nilai yang disetujui harus identik dengan nilai yang dijalankan.
 
-Pilihan v1 adalah **Run once** atau **Deny**, dengan fokus awal Deny. Review panjang harus digulir sampai bawah sebelum Run once tersedia. Teks `run`/`deny` tetap diterima. Tidak ada persetujuan otomatis seluruh session. Escape atau pembatalan tidak dianggap sebagai persetujuan. Hasil penolakan dicatat dan dikembalikan ke agent sebagai tool result.
+Pilihan v1 adalah **Accept** (menyetujui satu operasi) di atas **Deny**, dengan fokus awal Accept pada setiap konfirmasi shell maupun MCP. Review panjang harus digulir sampai bawah sebelum Accept dapat dijalankan. Teks `run`/`deny` tetap diterima. Timer aktivitas berhenti selama menunggu persetujuan dan berlanjut dari durasi sebelumnya setelah dijawab atau ditutup; waktu tunggu tidak ikut dihitung. Tidak ada persetujuan otomatis seluruh session. Escape atau pembatalan tidak dianggap sebagai persetujuan. Hasil penolakan dicatat dan dikembalikan ke agent sebagai tool result.
 
 ## Hasil dan kegagalan
 

@@ -6,6 +6,8 @@ const FRAME_MILLIS: u128 = 125;
 
 pub(super) struct Activity {
     started: Instant,
+    paused_at: Option<Instant>,
+    paused_duration: Duration,
     label: &'static str,
     pub turns: u32,
     pub total_tokens: Option<u64>,
@@ -24,6 +26,8 @@ impl Activity {
     pub fn new(label: &'static str) -> Self {
         Self {
             started: Instant::now(),
+            paused_at: None,
+            paused_duration: Duration::ZERO,
             label,
             turns: 0,
             total_tokens: None,
@@ -33,9 +37,30 @@ impl Activity {
         }
     }
 
-    /// Called only while work is active. Approval waits update once per second.
+    pub fn pause(&mut self, now: Instant) {
+        if self.paused_at.is_none() {
+            self.paused_at = Some(now);
+            self.last_frame = None;
+        }
+    }
+
+    pub fn resume(&mut self, now: Instant) {
+        if let Some(paused_at) = self.paused_at.take() {
+            self.paused_duration += now.saturating_duration_since(paused_at);
+            self.last_frame = None;
+        }
+    }
+
+    fn elapsed(&self, now: Instant) -> Duration {
+        self.paused_at
+            .unwrap_or(now)
+            .saturating_duration_since(self.started)
+            .saturating_sub(self.paused_duration)
+    }
+
+    /// Called only while work is active. Approval waits keep a frozen frame.
     pub fn tick(&mut self, now: Instant, waiting: bool) -> bool {
-        let elapsed = now.saturating_duration_since(self.started);
+        let elapsed = self.elapsed(now);
         let frame = if waiting {
             elapsed.as_secs() as u128
         } else {
@@ -47,7 +72,7 @@ impl Activity {
     }
 
     pub fn text(&self, now: Instant, canceled: bool, waiting: bool) -> String {
-        let elapsed = now.saturating_duration_since(self.started);
+        let elapsed = self.elapsed(now);
         let duration = duration(elapsed);
         let frame = FRAMES[(elapsed.as_millis() / FRAME_MILLIS % FRAMES.len() as u128) as usize];
         let (frame, label) = if canceled {
@@ -283,12 +308,98 @@ mod tests {
     }
 
     #[test]
+    fn elapsed_excludes_repeated_approval_waits_and_resumes_without_resetting() {
+        let mut activity = Activity::default();
+        let start = activity.started;
+        activity.pause(start + Duration::from_secs(5));
+        activity.pause(start + Duration::from_secs(10));
+        let waiting = activity.text(start + Duration::from_secs(65), false, true);
+        assert!(waiting.contains("Waiting for approval, 5s,"));
+        activity.resume(start + Duration::from_secs(65));
+        activity.resume(start + Duration::from_secs(66));
+        assert_eq!(
+            activity.elapsed(start + Duration::from_secs(68)),
+            Duration::from_secs(8)
+        );
+        assert!(
+            activity
+                .text(start + Duration::from_secs(68), false, false)
+                .contains("AI Working, 8s,")
+        );
+        activity.pause(start + Duration::from_secs(70));
+        assert_eq!(
+            activity.elapsed(start + Duration::from_secs(130)),
+            Duration::from_secs(10)
+        );
+        activity.resume(start + Duration::from_secs(130));
+        assert_eq!(
+            activity.elapsed(start + Duration::from_secs(132)),
+            Duration::from_secs(12)
+        );
+    }
+
+    #[test]
+    fn approval_lifecycle_pauses_until_answer_escape_or_cancel() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        for review in ["Shell approval · fixture", "MCP approval · fixture"] {
+            for action in ["run", "deny", "escape", "cancel"] {
+                let (_temp, mut app, _rx) = fixture();
+                let cancel = app.begin_work("AI Working", "fixture");
+                let (respond, mut answer) = tokio::sync::oneshot::channel();
+                app.event(
+                    UiEvent::Approval {
+                        review: review.into(),
+                        respond,
+                    },
+                    40,
+                )
+                .unwrap();
+                assert!(app.activity.paused_at.is_some());
+                let now = Instant::now();
+                let elapsed = app.activity.elapsed(now);
+                assert_eq!(app.activity.elapsed(now + Duration::from_secs(60)), elapsed);
+                render(&mut app, 100, 40);
+                app.editor.set("invalid answer".into());
+                app.submit(40).unwrap();
+                assert!(app.activity.paused_at.is_some());
+                match action {
+                    "run" | "deny" => {
+                        app.editor.set(action.into());
+                        app.submit(40).unwrap();
+                        assert_eq!(answer.try_recv().unwrap(), action == "run");
+                    }
+                    "escape" => app
+                        .key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 40)
+                        .unwrap(),
+                    "cancel" => app.cancel(),
+                    _ => unreachable!(),
+                }
+                assert!(app.activity.paused_at.is_none());
+                assert!(
+                    app.activity
+                        .elapsed(Instant::now() + Duration::from_secs(1))
+                        > elapsed
+                );
+                assert!(matches!(app.dialog, Dialog::None));
+                assert_eq!(cancel.is_cancelled(), action == "cancel");
+                if matches!(action, "escape" | "cancel") {
+                    assert!(matches!(
+                        answer.try_recv(),
+                        Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn approval_waits_have_no_spinner_and_cancel_overrides_late_status_events() {
         let mut activity = Activity::default();
         let start = activity.started;
+        activity.pause(start);
         assert!(activity.tick(start, true));
         assert!(!activity.tick(start + Duration::from_millis(900), true));
-        assert!(activity.tick(start + Duration::from_secs(1), true));
+        assert!(!activity.tick(start + Duration::from_secs(60), true));
         let waiting = activity.text(start, false, true);
         assert_eq!(
             waiting,

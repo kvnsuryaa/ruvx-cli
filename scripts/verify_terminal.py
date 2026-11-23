@@ -646,12 +646,16 @@ def functional(binary):
             terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "shell review")
             assert "Waiting for approval" in terminal.activity_row()[1]
             assert "Waiting for approval" not in "".join(terminal.grid.cells[1])
-            terminal.wait(lambda: "Run once" in terminal.grid.text(), "approval buttons")
+            terminal.wait(lambda: "> Accept" in terminal.grid.text(), "default Accept approval choice")
+            assert terminal.grid.locate("Accept")[1] < terminal.grid.locate("Deny")[1]
+            paused_activity = terminal.activity_row()[1]
+            terminal.pump(1.2)
+            assert terminal.activity_row()[1] == paused_activity, "Approval wait advanced the timer"
             terminal.send("\x1b[Z")
             terminal.pump(0.1)
             assert "[Build]" in terminal.grid.text(), "Shift+Tab changed mode during shell approval"
             assert not (workspace / "denied.txt").exists()
-            x, y = terminal.grid.locate("Run once")
+            x, y = terminal.grid.locate("Accept")
             terminal.mouse(0, x, y)
             terminal.mouse(32, x + 2, y)
             terminal.mouse(0, x + 2, y, release=True)
@@ -831,7 +835,7 @@ def git_push_workflow(binary):
             server.replies.put((completion("LOCAL_PUSH_OK"), 0))
             terminal.enter("Commit and push to the local test remote")
             terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "commit review")
-            x, y = terminal.grid.locate("Run once")
+            x, y = terminal.grid.locate("Accept")
             # Both clicks arrive in the same input burst, before a new frame.
             click = f"\x1b[<0;{x + 1};{y + 1}M\x1b[<0;{x + 1};{y + 1}m"
             terminal.send(click * 2)

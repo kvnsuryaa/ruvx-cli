@@ -757,8 +757,8 @@ impl Dialog {
                 ("No".into(), "no".into()),
             ],
             Self::Approval { .. } => vec![
+                ("Accept".into(), "run".into()),
                 ("Deny".into(), "deny".into()),
-                ("Run once".into(), "run".into()),
             ],
             _ => vec![],
         };

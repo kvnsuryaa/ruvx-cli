@@ -142,7 +142,7 @@ impl App {
         match args {
             [] => {
                 let mut output = format!(
-                    "MCP servers · stdio only\nConfig: {}\n/mcp add · /mcp edit <id> · /mcp remove <id>\n/mcp enable <id> · /mcp disable <id>\nEach operation requires approval in Build. Servers stop when the agent run ends.\nNo servers are started by configuration commands.\n\n",
+                    "MCP servers · stdio only\nConfig: {}\n/mcp add · /mcp edit <id> · /mcp remove <id>\n/mcp enable <id> · /mcp disable <id>\nBuild operations follow the active Ask/BYPASS approval policy. Servers stop when the agent run ends.\nNo servers are started by configuration commands.\n\n",
                     self.paths.config_file().display()
                 );
                 for (id, server) in &self.config.mcp_servers {

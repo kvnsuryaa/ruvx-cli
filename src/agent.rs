@@ -86,7 +86,7 @@ async fn run(
     let run_id = Uuid::new_v4();
     session.record(
         "run.started",
-        json!({"run_id":run_id,"max_turns":config.agent.max_turns,"selection":selection,"reasoning_effort":profile.model(&selection.model)?.reasoning_effort}),
+        json!({"run_id":run_id,"max_turns":config.agent.max_turns,"selection":selection,"reasoning_effort":profile.model(&selection.model)?.reasoning_effort,"approval_policy":if config.bypass {"bypass"} else {"ask"}}),
     )?;
     let mut runtime = tools::Runtime::new(paths);
     let mut turns = 0u32;

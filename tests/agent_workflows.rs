@@ -707,6 +707,7 @@ async fn effort_reaches_every_tool_turn_compaction_and_can_return_to_default() {
 async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
     for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
         let mut f = Fixture::new(kind).await;
+        f.config.bypass = true;
         f.config.mcp_servers.insert(
             "test".into(),
             ruvx::config::McpServerConfig {
@@ -722,6 +723,14 @@ async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
         f.reply("", vec![("s1", "list_skills", json!({}))]);
         f.reply("", vec![("s2", "read_skill", json!({"name":"demo"}))]);
         f.reply("", vec![("m1", "mcp_list_tools", json!({"server":"test"}))]);
+        f.reply(
+            "",
+            vec![(
+                "shell-plan",
+                "run_shell",
+                json!({"command":"touch forbidden-shell"}),
+            )],
+        );
         f.reply("Done", vec![]);
         let (session, error) = f
             .run(
@@ -732,6 +741,7 @@ async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
             .await;
         assert!(error.is_none(), "{error:?}");
         assert!(!f.root.join("forbidden").exists());
+        assert!(!f.root.join("forbidden-shell").exists());
         let history = session.history().unwrap();
         assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "read_skill" && content.contains("existing permission controls"))));
         assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "mcp_list_tools" && content.contains("not allowed in Plan"))));
@@ -743,30 +753,126 @@ async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn bypass_executes_shell_and_mcp_without_approval_then_ask_policy_returns() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        let mut f = Fixture::new(kind).await;
+        f.config.bypass = true;
+        f.config.mcp_servers.insert(
+            "fixture".into(),
+            ruvx::config::McpServerConfig {
+                enabled: true,
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), include_str!("fixtures/mcp-stdio.sh").into()],
+                ..Default::default()
+            },
+        );
+        f.reply(
+            "",
+            vec![("list", "mcp_list_tools", json!({"server":"fixture"}))],
+        );
+        f.reply(
+            "",
+            vec![(
+                "next",
+                "mcp_list_tools",
+                json!({"server":"fixture","cursor":"page2"}),
+            )],
+        );
+        f.reply(
+            "",
+            vec![(
+                "echo",
+                "mcp_call_tool",
+                json!({"server":"fixture","tool":"echo","arguments":{"text":"hello"}}),
+            )],
+        );
+        f.reply(
+            "",
+            vec![(
+                "shell",
+                "run_shell",
+                json!({"command":"printf executed > bypass.txt"}),
+            )],
+        );
+        f.reply("Done", vec![]);
+        let mut session = f.session();
+        session.set_mode(Mode::Build).unwrap();
+        let (session, error) = f
+            .run(
+                session,
+                Action::Message("Execute with BYPASS".into()),
+                vec![],
+            )
+            .await;
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(
+            fs::read_to_string(f.root.join("bypass.txt")).unwrap(),
+            "executed"
+        );
+        assert!(session.pending_tools.is_empty());
+        let journal: Vec<Value> = fs::read_to_string(session.dir.join("events.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let approvals: Vec<_> = journal
+            .iter()
+            .filter(|e| e["kind"] == "approval.resolved")
+            .collect();
+        assert_eq!(approvals.len(), 4);
+        assert!(
+            approvals
+                .iter()
+                .all(|e| e["payload"]["approved"] == true && e["payload"]["policy"] == "bypass")
+        );
+        let first_request = f.state.requests.lock().unwrap()[0].to_string();
+        assert!(first_request.contains("Approval policy: BYPASS"));
+        f.config.bypass = false;
+        f.reply(
+            "",
+            vec![("ask", "run_shell", json!({"command":"touch must-not-run"}))],
+        );
+        f.reply("Denied", vec![]);
+        let (_, error) = f
+            .run(session, Action::Message("Ask again".into()), vec![false])
+            .await;
+        assert!(error.is_none(), "{error:?}");
+        assert!(!f.root.join("must-not-run").exists());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn uncertain_mcp_stops_agent_and_blocks_replay() {
-    let mut f = Fixture::new(ProviderKind::Compatible).await;
-    f.config.mcp_servers.insert(
-        "test".into(),
-        ruvx::config::McpServerConfig {
-            enabled: true,
-            command: "/bin/sh".into(),
-            args: vec!["-c".into(), "exit 0".into()],
-            ..Default::default()
-        },
-    );
-    let mut session = f.session();
-    session.set_mode(Mode::Build).unwrap();
-    f.reply("", vec![("m1", "mcp_list_tools", json!({"server":"test"}))]);
-    let (session, error) = f
-        .run(session, Action::Message("List tools".into()), vec![true])
-        .await;
-    assert!(error.unwrap().contains("uncertain"));
-    assert!(session.pending_tools.contains("m1"));
-    let (_session, error) = f
-        .run(session, Action::Message("Try again".into()), vec![])
-        .await;
-    assert!(error.unwrap().contains("uncertain outcomes"));
-    assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+    for bypass in [false, true] {
+        let mut f = Fixture::new(ProviderKind::Compatible).await;
+        f.config.mcp_servers.insert(
+            "test".into(),
+            ruvx::config::McpServerConfig {
+                enabled: true,
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "exit 0".into()],
+                ..Default::default()
+            },
+        );
+        f.config.bypass = bypass;
+        let mut session = f.session();
+        session.set_mode(Mode::Build).unwrap();
+        f.reply("", vec![("m1", "mcp_list_tools", json!({"server":"test"}))]);
+        let (session, error) = f
+            .run(
+                session,
+                Action::Message("List tools".into()),
+                if bypass { vec![] } else { vec![true] },
+            )
+            .await;
+        assert!(error.unwrap().contains("uncertain"));
+        assert!(session.pending_tools.contains("m1"));
+        let (_session, error) = f
+            .run(session, Action::Message("Try again".into()), vec![])
+            .await;
+        assert!(error.unwrap().contains("uncertain outcomes"));
+        assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

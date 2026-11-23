@@ -323,6 +323,9 @@ impl App {
         lines.push_back(
             "Use /connect to add a provider, /model to choose a model, /help for commands.".into(),
         );
+        if config.bypass {
+            lines.push_back("BYPASS is on: Build shell/MCP operations run without approval. Use /bypass off to restore approval.".into());
+        }
         for warning in &session.warnings {
             lines.push_back(warning.clone());
         }
@@ -588,7 +591,8 @@ impl App {
         let root = current.root.clone();
         let old_id = current.id.clone();
         // Refresh global settings before releasing the existing workspace writer.
-        let config = self.paths.load()?;
+        let mut config = self.paths.load()?;
+        config.bypass = self.config.bypass;
         if let Some(id) = id {
             ensure!(
                 list_sessions(&self.paths, &root)?
@@ -603,6 +607,13 @@ impl App {
                 || Session::create(&self.paths, &root),
                 |id| Session::resume(&self.paths, id),
             )?;
+            if config.bypass {
+                session.set_mode(Mode::Build)?;
+                session.record(
+                    "approval.policy_changed",
+                    serde_json::json!({"policy":"bypass","source":"session_switch"}),
+                )?;
+            }
             let restored = model_preference::restore(&self.paths, &config, &mut session);
             let transcript = Transcript::from_session(&session)?;
             Ok((session, transcript, restored))
@@ -658,6 +669,28 @@ impl App {
         match command {
             "/help" => self.page(commands::help(), Dialog::None, height),
             "/effort" => self.effort_command(&args, height)?,
+            "/bypass" => match args.as_slice() {
+                [] => self.line(format!(
+                    "BYPASS: {}. Use /bypass on or /bypass off. Applies to this process only.",
+                    if self.config.bypass { "on" } else { "off" }
+                )),
+                [value @ ("on" | "off")] => {
+                    let enabled = *value == "on";
+                    let session = self.session.as_mut().context("Session unavailable")?;
+                    if enabled && session.mode != Mode::Build {
+                        session.set_mode(Mode::Build)?;
+                        self.mode = Mode::Build;
+                    }
+                    session.record("approval.policy_changed", serde_json::json!({"policy":if enabled {"bypass"} else {"ask"},"source":"tui"}))?;
+                    self.config.bypass = enabled;
+                    self.line(if enabled {
+                        "BYPASS on · Build · shell/MCP approvals bypassed for this process."
+                    } else {
+                        "BYPASS off · shell/MCP operations require approval again."
+                    });
+                }
+                _ => bail!("Usage: /bypass [on|off]"),
+            },
             "/quit" => self.quit = true,
             "/connect" => {
                 if let Some(id) = args.first() {
@@ -1749,11 +1782,48 @@ mod tests {
             .unwrap();
     }
     #[test]
+    fn bypass_toggle_is_visible_local_and_cannot_change_during_active_work() {
+        let (_temp, mut app, mut rx) = fixture();
+        assert!(!app.config.bypass);
+        app.editor.set("preserve this draft".into());
+        app.command("/bypass on", 40).unwrap();
+        assert!(app.config.bypass);
+        assert_eq!(app.mode, Mode::Build);
+        assert_eq!(app.session.as_ref().unwrap().mode, Mode::Build);
+        for (width, height) in [(100, 40), (48, 16), (24, 10)] {
+            assert!(render(&mut app, width, height).contains("BYPASS"));
+        }
+        assert!(!app.paths.config_file().exists());
+        assert_eq!(app.editor.text, "preserve this draft");
+        app.command("/new", 40).unwrap();
+        assert!(app.config.bypass);
+        assert_eq!(app.mode, Mode::Build);
+        let cancel = app.begin_work("AI Working", "test");
+        assert!(app.command("/bypass off", 40).is_err());
+        assert!(app.config.bypass);
+        assert!(!cancel.is_cancelled());
+        app.finish_work();
+        app.command("/bypass off", 40).unwrap();
+        assert!(!app.config.bypass);
+        assert_eq!(app.mode, Mode::Build);
+        assert!(
+            !render(&mut app, 100, 40)
+                .chars()
+                .take(100)
+                .collect::<String>()
+                .contains("BYPASS")
+        );
+        assert!(!app.paths.load().unwrap().bypass);
+        assert!(app.command("/bypass maybe", 40).is_err());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
     fn slash_menu_filters_dismisses_and_reopens_only_after_editing() {
         let (_temp, mut app, _rx) = fixture();
         app.editor.set("/".into());
         let items = app.command_matches().unwrap();
-        assert_eq!(items.len(), 16);
+        assert_eq!(items.len(), 17);
         assert_eq!(items[0].name, "/help");
         assert!(!items.iter().any(|c| c.name == "/usage"));
         let help = commands::help();

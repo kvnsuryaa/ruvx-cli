@@ -52,6 +52,12 @@ pub(super) const COMMANDS: &[Command] = &[
         required: false,
     },
     Command {
+        name: "/bypass",
+        args: "[on|off]",
+        description: "Show or change process-local shell/MCP approval bypass",
+        required: false,
+    },
+    Command {
         name: "/mode",
         args: "plan|build",
         description: "Change mode while idle",
@@ -217,4 +223,4 @@ pub(super) fn help() -> String {
     text
 }
 
-const INPUT_HELP: &str = "\n/ opens commands · Up/Down selects · Enter opens · Tab completes · Escape closes\n\nEnter sends · Alt+Enter adds a line · bracketed paste accepts multiline\nOption+Delete / Ctrl+W deletes a word · Ctrl+U deletes to line start\nOption may need Meta/Esc mapping\nLong pastes become previews · click or F2 edits · Ctrl+S saves · Escape cancels\nDrag selects and copies on release; Ctrl+C copies/clears a selection first\nPgUp/PgDn or wheel scroll · Alt+End latest · Shift+Tab switches Plan/Build (idle) · F6/Shift+F6 focuses controls\nTab/arrows navigate controls · Enter opens · Escape returns to input or closes review\nCtrl+C without selection cancels active work; idle: clear draft, then exit\n@path or @\"path with spaces\" attaches file data; // sends a literal /\n\nPlan: read/search only. Build: direct edits; every shell command needs approval.\nShell uses OS permissions; cwd is not an OS sandbox.\n";
+const INPUT_HELP: &str = "\n/ opens commands · Up/Down selects · Enter opens · Tab completes · Escape closes\n\nEnter sends · Alt+Enter adds a line · bracketed paste accepts multiline\nOption+Delete / Ctrl+W deletes a word · Ctrl+U deletes to line start\nOption may need Meta/Esc mapping\nLong pastes become previews · click or F2 edits · Ctrl+S saves · Escape cancels\nDrag selects and copies on release; Ctrl+C copies/clears a selection first\nPgUp/PgDn or wheel scroll · Alt+End latest · Shift+Tab switches Plan/Build (idle) · F6/Shift+F6 focuses controls\nTab/arrows navigate controls · Enter opens · Escape returns to input or closes review\nCtrl+C without selection cancels active work; idle: clear draft, then exit\n@path or @\"path with spaces\" attaches file data; // sends a literal /\n\nPlan: read/search only. Build: direct edits; Ask prompts for shell/MCP, BYPASS skips approval.\nShell uses OS permissions; cwd is not an OS sandbox.\n";

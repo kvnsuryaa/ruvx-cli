@@ -8,7 +8,7 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use nix::{
     sys::signal::{Signal, killpg},
-    unistd::Pid,
+    unistd::{Pid, setsid},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -66,13 +66,16 @@ pub async fn run(
         before.files.len(),
         before.skipped
     );
-    let (respond, answer) = oneshot::channel();
-    tx.send(UiEvent::Approval { review, respond })
-        .await
-        .context("Terminal closed before approval")?;
-    let approved =
-        tokio::select! { _=cancel.cancelled()=>false, answer=answer=>answer.unwrap_or(false) };
-    session.record("approval.resolved",json!({"call_id":call.id,"approved":approved,"command":args.command,"cwd":cwd,"timeout_seconds":timeout}))?;
+    let approved = if config.bypass {
+        !cancel.is_cancelled()
+    } else {
+        let (respond, answer) = oneshot::channel();
+        tx.send(UiEvent::Approval { review, respond })
+            .await
+            .context("Terminal closed before approval")?;
+        tokio::select! { _=cancel.cancelled()=>false, answer=answer=>answer.unwrap_or(false) }
+    };
+    session.record("approval.resolved",json!({"call_id":call.id,"approved":approved,"policy":if config.bypass {"bypass"} else {"ask"},"command":args.command,"cwd":cwd,"timeout_seconds":timeout}))?;
     if !approved {
         return Ok(
             json!({"status":if cancel.is_cancelled(){"canceled"}else{"denied"},"message":"Command was not executed"}),
@@ -113,7 +116,14 @@ pub async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
-        .process_group(0);
+        .env("GIT_TERMINAL_PROMPT", "0");
+    // A separate process group still shares the parent's controlling terminal.
+    // setsid also detaches /dev/tty and creates the group used by killpg below.
+    // SAFETY: the post-fork hook only calls the async-signal-safe setsid syscall
+    // and converts errno; it does not allocate, lock, or access shared state.
+    unsafe {
+        command.pre_exec(|| setsid().map(|_| ()).map_err(std::io::Error::from));
+    }
     let mut child = command.spawn().context("Could not start shell")?;
     let pid = child.id().context("Shell process has no PID")?;
     let mut process_guard = ProcessGroupGuard { pid, armed: true };
@@ -152,9 +162,15 @@ pub async fn run(
         .context("stderr reader did not finish")???;
     let after = tokio::task::block_in_place(|| snapshot(session, &config.tools))?;
     tokio::task::block_in_place(|| record_snapshot_changes(session, &before, &after))?;
-    Ok(
-        json!({"status":if reason!="exited"{reason}else if status.success(){"ok"}else{"failed"},"exit_code":status.code(),"signal":status.signal(),"stdout":out.text(),"stderr":err.text(),"truncated":out.truncated()||err.truncated(),"stdout_bytes":out.total,"stderr_bytes":err.total,"artifacts":[stdout_path,stderr_path],"duration_ms":started.elapsed().as_millis(),"review_note":"Changes observed during command interval; ignored/build/binary/oversized/outside-workspace files excluded."}),
-    )
+    let stderr = err.text();
+    let auth_required = !status.success() && stderr.contains("terminal prompts disabled");
+    let mut result = json!({"status":if reason!="exited"{reason}else if status.success(){"ok"}else{"failed"},"exit_code":status.code(),"signal":status.signal(),"stdout":out.text(),"stderr":stderr,"truncated":out.truncated()||err.truncated(),"stdout_bytes":out.total,"stderr_bytes":err.total,"artifacts":[stdout_path,stderr_path],"duration_ms":started.elapsed().as_millis(),"review_note":"Changes observed during command interval; ignored/build/binary/oversized/outside-workspace files excluded."});
+    if auth_required {
+        result["auth_hint"] = json!(
+            "Git authentication is required. Authenticate Git in a separate terminal, then retry explicitly. Existing credential helpers and SSH agents remain available."
+        );
+    }
+    Ok(result)
 }
 
 async fn terminate(
@@ -266,6 +282,47 @@ async fn capture(
 mod tests {
     use super::*;
     use crate::{config::Paths, model::Mode};
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bypass_bypasses_approval_but_preserves_timeouts() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = Paths::at(&temp.path().join("state"));
+        let root = temp.path().join("work");
+        std::fs::create_dir(&root).unwrap();
+        let mut session = Session::create(&paths, &root).unwrap();
+        session.set_mode(Mode::Build).unwrap();
+        let config = Config {
+            bypass: true,
+            ..Default::default()
+        };
+        let (tx, mut rx) = mpsc::channel(32);
+        let watcher = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                assert!(!matches!(event, UiEvent::Approval { .. }));
+            }
+        });
+        let result = run(
+            &mut session,
+            &config,
+            &ToolCall {
+                id: "bypass-timeout".into(),
+                name: "run_shell".into(),
+                arguments: "{}".into(),
+            },
+            ShellArgs {
+                command: "sleep 30 & wait".into(),
+                cwd: None,
+                timeout_seconds: Some(1),
+            },
+            &tx,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["status"], "timed_out");
+        drop(tx);
+        watcher.await.unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn denial_never_spawns_and_approval_captures_diff() {
         let temp = tempfile::tempdir().unwrap();

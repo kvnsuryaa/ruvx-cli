@@ -68,7 +68,8 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     } else {
         Color::Green
     };
-    let title = format!("ruvx · {}", app.workspace);
+    let bypass = if app.config.bypass { " · BYPASS" } else { "" };
+    let title = format!("ruvx{bypass} · {}", app.workspace);
     label(
         frame,
         Rect::new(1, 0, area.width.saturating_sub(2), 1),
@@ -125,7 +126,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         label(
             frame,
             Rect::new(1, 0, area.width - 2, 1),
-            format!("ruvx · {} · {model}", app.mode),
+            format!("ruvx{bypass} · {} · {model}", app.mode),
             Style::default().fg(accent),
         );
     }

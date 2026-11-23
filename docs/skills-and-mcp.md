@@ -56,7 +56,7 @@ Frontmatter memakai YAML; `name` dan `description` wajib, field tambahan boleh a
 - Pembacaan tunduk pada `tools.max_file_bytes`, `read_max_lines`, dan `result_max_bytes`. Batas hasil mencakup JSON lengkap, termasuk escape, envelope, dan warning. Ikuti `next_cursor` / `next_line`; bila satu entri/baris tidak muat, hasilnya error terarah. Warning yang tidak muat dihitung dalam `warnings_omitted`. Resource non-UTF-8 atau non-regular seperti FIFO tidak didukung. Discovery koleksi dibatasi 1024 entri per lokasi, dengan warning jika terlampaui. Skill rusak dilewati dengan warning.
 - Metadata dibaca ulang saat membangun konteks dan pada discovery/read berikutnya, sehingga perubahan skill terlihat tanpa restart. Saat discovery dinonaktifkan, katalog dan tools skill tidak diiklankan ke model.
 
-Skill hanyalah guidance, **bukan pemberian permission**. Script tidak dijalankan otomatis. Menjalankan script memerlukan Build dan `run_shell` yang disetujui. Field seperti `allowed-tools` tidak memperluas izin. Skill tidak dapat mengganti mode, provider, atau AGENTS.md. Installer, download dependency otomatis, dan invocation slash-command per skill belum tersedia.
+Skill hanyalah guidance, **bukan pemberian permission**. Script tidak dijalankan otomatis. Menjalankan script memerlukan Build dan `run_shell` menurut kebijakan Ask atau BYPASS yang dipilih pengguna. Field seperti `allowed-tools` tidak memperluas izin. Skill tidak dapat mengganti mode, provider, atau AGENTS.md. Installer, download dependency otomatis, dan invocation slash-command per skill belum tersedia.
 
 Untuk menonaktifkan discovery:
 
@@ -101,7 +101,7 @@ max_message_bytes = 1048576
 2. Ganti ke Build dan minta agent memakai server yang diinginkan.
 3. Agent memanggil `mcp_list_tools` dengan `server` dan opsional `cursor` untuk halaman lanjutan. Pengguna mendapat review executable, argv, cwd workspace, nama environment, parameter, dan timeout sebelum startup/discovery.
 4. Hasil mengandung `result.tools` beserta schema. Jika ada `result.nextCursor`, agent dapat meminta halaman berikutnya.
-5. Agent memakai `mcp_call_tool` dengan `server`, `tool`, dan `arguments` object. Tool harus sudah ditemukan pada run yang sama. **Setiap panggilan**, termasuk discovery lanjutan, meminta approval baru.
+5. Agent memakai `mcp_call_tool` dengan `server`, `tool`, dan `arguments` object. Tool harus sudah ditemukan pada run yang sama. Pada kebijakan Ask bawaan, **setiap panggilan**, termasuk discovery lanjutan, meminta approval baru. Pada BYPASS, operasi berjalan langsung.
 
 Contoh argumen tool internal (bukan command terminal):
 
@@ -113,7 +113,9 @@ Contoh argumen tool internal (bukan command terminal):
 {"server":"local_tools","tool":"search_docs","arguments":{"query":"Rust ownership"}}
 ```
 
-Gateway memakai nama tetap `mcp_list_tools` dan `mcp_call_tool`, sehingga nama tool server tidak berbenturan dengan tool bawaan ruvx. Schema server diteruskan sebagai data discovery, bukan otomatis dijadikan fungsi provider. Anotasi server seperti `readOnlyHint` tidak menghapus kebutuhan approval.
+Gateway memakai nama tetap `mcp_list_tools` dan `mcp_call_tool`, sehingga nama tool server tidak berbenturan dengan tool bawaan ruvx. Schema server diteruskan sebagai data discovery, bukan otomatis dijadikan fungsi provider. Anotasi server seperti `readOnlyHint` tidak mengubah kebijakan approval pengguna.
+
+`ruvx --bypass` atau `/bypass on` saat idle mengaktifkan Build dan melewati approval shell maupun MCP, termasuk startup/discovery. `/bypass off` mengembalikan Ask. BYPASS hanya berlaku pada proses aktif; restart tanpa flag kembali Ask. Status terlihat di header, dan jurnal membedakan keputusan `policy: "bypass"` dari `policy: "ask"`. Konfigurasi server, schema, batas data, timeout, cleanup, serta pemblokiran replay outcome tidak pasti tetap berlaku.
 
 ### Lifetime dan keamanan
 

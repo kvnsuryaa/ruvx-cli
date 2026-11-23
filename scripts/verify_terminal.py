@@ -170,7 +170,7 @@ class Grid:
 
 
 class Terminal:
-    def __init__(self, binary, workspace, env, resume=None, observer=None):
+    def __init__(self, binary, workspace, env, resume=None, observer=None, bypass=False):
         self.grid = Grid(100, 40)
         self.master, self.slave = os.openpty()
         self.original = termios.tcgetattr(self.slave)
@@ -185,6 +185,8 @@ class Terminal:
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
         args = [str(binary), "--resume", resume] if resume else [str(binary), str(workspace)]
+        if bypass:
+            args.append("--bypass")
         # Keep a session leader alive after ruvx exits. macOS revokes a PTY when
         # its session leader exits, preventing a post-exit termios inspection.
         self.release_file = workspace.parent / ("pty-release-" + uuid.uuid4().hex)
@@ -813,6 +815,152 @@ def git_push_workflow(binary):
         server.server_close()
 
 
+def git_auth_terminal_isolation(binary):
+    """An HTTP 401 must become a tool error rather than a prompt on the TUI's tty."""
+    if shutil.which("git") is None:
+        return {"skipped": "git is not installed"}
+
+    class AuthRequired(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="local fixture"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    provider = Provider()
+    auth_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), AuthRequired)
+    for server in [provider, auth_server]:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    terminal = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="ruvx-auth-pty-") as directory:
+            root = Path(directory)
+            workspace, _, data, env = fixture_env(root, provider.server_port)
+            env = {key: value for key, value in env.items() if not key.startswith("GIT_") and key != "SSH_ASKPASS"}
+            # Prove ruvx sets its own non-interactive policy rather than relying on the parent.
+            env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="1", LC_ALL="C")
+            terminal = Terminal(binary, workspace, env)
+            terminal.enter("/model fixture m")
+            terminal.enter("/mode build")
+            command = f"git -c credential.helper= -c core.askPass= ls-remote http://127.0.0.1:{auth_server.server_port}/private.git"
+            provider.replies.put((completion(calls=[("auth-required", "run_shell", {"command": command, "timeout_seconds": 2})]), 0))
+            provider.replies.put((completion("AUTH_REQUIRED_HANDLED"), 0))
+            terminal.enter("Check the local authentication fixture")
+            terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "authentication operation approval")
+            marker = len(terminal.output)
+            terminal.enter("run")
+            terminal.wait(lambda: "AUTH_REQUIRED_HANDLED" in terminal.grid.text(), "authentication fails without an interactive terminal prompt")
+            terminal.wait(terminal.idle, "ready after authentication failure")
+            assert b"Username for 'http://" not in terminal.output[marker:], "Git wrote its credential prompt directly onto the application terminal"
+            results = [e for e in events(data) if e["kind"] == "tool.finished" and e["payload"].get("call_id") == "auth-required"]
+            assert len(results) == 1
+            event = results[0]
+            session = data / "ruvx" / "sessions" / event["session_id"]
+            result = json.loads((session / "blobs" / event["payload"]["blob"]["id"]).read_text())
+            assert result["status"] == "failed", result["status"]
+            assert "terminal prompts disabled" in result["stderr"]
+            assert "separate terminal" in result["auth_hint"]
+            # Even a command that explicitly opens /dev/tty cannot borrow the TUI.
+            provider.replies.put((completion(calls=[("tty-check", "run_shell", {"command": "if (printf UNEXPECTED_TTY_ACCESS > /dev/tty) 2>/dev/null; then printf borrowed; else printf detached; fi"})]), 0))
+            provider.replies.put((completion("TTY_ISOLATION_HANDLED"), 0))
+            terminal.enter("Check terminal isolation")
+            terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "terminal isolation approval")
+            marker = len(terminal.output)
+            terminal.enter("run")
+            terminal.wait(lambda: "TTY_ISOLATION_HANDLED" in terminal.grid.text(), "terminal isolation result")
+            terminal.wait(terminal.idle, "ready after terminal isolation check")
+            assert b"UNEXPECTED_TTY_ACCESS" not in terminal.output[marker:]
+            assert any("detached" in json.dumps(message) for message in provider.requests[-1]["messages"] if message.get("role") == "tool")
+            terminal.close()
+            return {"http_401": "captured failure with authentication hint", "controlling_terminal": "detached", "external_services_used": False}
+    finally:
+        if terminal is not None and terminal.process.poll() is None:
+            try:
+                os.kill(terminal.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            terminal.process.kill()
+            terminal.process.wait()
+        for server in [provider, auth_server]:
+            server.shutdown()
+            server.server_close()
+
+
+def bypass_workflow(binary):
+    server = Provider()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    terminal = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="ruvx-bypass-pty-") as directory:
+            root = Path(directory)
+            workspace, config, data, env = fixture_env(root, server.server_port)
+            fixture = (Path(__file__).resolve().parent.parent / "tests/fixtures/mcp-stdio.sh").read_text()
+            config_file = config / "ruvx" / "config.toml"
+            config_file.write_text(config_file.read_text() + '\n[mcp_servers.fixture]\nenabled = true\ncommand = "/bin/sh"\nargs = ["-c", ' + json.dumps(fixture) + ']\n')
+            terminal = Terminal(binary, workspace, env)
+            assert "BYPASS" not in "".join(terminal.grid.cells[0])
+            terminal.enter("/model fixture m")
+            terminal.enter("/bypass on")
+            terminal.wait(lambda: "BYPASS" in "".join(terminal.grid.cells[0]) and "[Build]" in terminal.grid.text(), "TUI enables BYPASS and Build")
+            for call in [
+                ("list", "mcp_list_tools", {"server":"fixture"}),
+                ("next", "mcp_list_tools", {"server":"fixture", "cursor":"page2"}),
+                ("echo", "mcp_call_tool", {"server":"fixture", "tool":"echo", "arguments":{"text":"hello"}}),
+                ("shell", "run_shell", {"command":"printf bypass > bypass.txt"}),
+            ]:
+                server.replies.put((completion(calls=[call]), 0))
+            server.replies.put((completion("BYPASS_TUI_DONE"), 0))
+            terminal.enter("Use MCP and shell with BYPASS")
+            terminal.wait(lambda: "BYPASS_TUI_DONE" in terminal.grid.text(), "shell and MCP finish without approval")
+            terminal.wait(terminal.idle, "BYPASS run ready")
+            assert (workspace / "bypass.txt").read_text() == "bypass"
+            approvals = [e for e in events(data) if e["kind"] == "approval.resolved"]
+            assert len(approvals) == 4 and all(e["payload"]["policy"] == "bypass" for e in approvals)
+            terminal.enter("/new")
+            terminal.wait(lambda: "BYPASS" in "".join(terminal.grid.cells[0]) and "[Build]" in terminal.grid.text(), "BYPASS survives new session in the same process")
+            terminal.enter("/bypass off")
+            terminal.wait(lambda: "BYPASS" not in "".join(terminal.grid.cells[0]), "BYPASS disabled")
+            assert "bypass" not in tomllib.loads(config_file.read_text())
+            server.replies.put((completion(calls=[("ask", "run_shell", {"command":"touch must-not-exist"})]), 0))
+            server.replies.put((completion("ASK_RESTORED"), 0))
+            terminal.enter("Use normal approval again")
+            terminal.wait(lambda: "Shell approval" in terminal.grid.text(), "approval restored after BYPASS off")
+            terminal.enter("deny")
+            terminal.wait(lambda: "ASK_RESTORED" in terminal.grid.text(), "denial handled")
+            terminal.wait(terminal.idle, "ready after denial")
+            assert not (workspace / "must-not-exist").exists()
+            terminal.close()
+            terminal = Terminal(binary, workspace, env, bypass=True)
+            terminal.wait(lambda: "BYPASS" in "".join(terminal.grid.cells[0]) and "[Build]" in terminal.grid.text(), "CLI --bypass starts in Build")
+            server.replies.put((completion(calls=[("cli", "run_shell", {"command":"printf cli > cli-bypass.txt"})]), 0))
+            server.replies.put((completion("BYPASS_CLI_DONE"), 0))
+            terminal.enter("Run with CLI BYPASS")
+            terminal.wait(lambda: "BYPASS_CLI_DONE" in terminal.grid.text(), "CLI BYPASS shell without approval")
+            terminal.wait(terminal.idle, "CLI BYPASS ready")
+            assert (workspace / "cli-bypass.txt").read_text() == "cli"
+            session_id = [e["session_id"] for e in events(data) if e["kind"] == "session.created"][-1]
+            terminal.close()
+            request_count = len(server.requests)
+            terminal = Terminal(binary, workspace, env, resume=session_id)
+            assert "BYPASS" not in "".join(terminal.grid.cells[0]), "BYPASS persisted after restarting without the flag"
+            assert len(server.requests) == request_count, "Resume replayed BYPASS operations"
+            terminal.close()
+            return {"cli_and_tui": "passed", "shell_and_mcp_without_approval": "passed", "off_restores_approval": "passed", "restart_defaults_to_ask": "passed"}
+    finally:
+        if terminal is not None and terminal.process.poll() is None:
+            try:
+                os.kill(terminal.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            terminal.process.kill()
+            terminal.process.wait()
+        server.shutdown()
+        server.server_close()
+
+
 def benchmark(binary):
     samples = []
     idle_rss = []
@@ -1017,7 +1165,8 @@ def main():
     report = {"platform": platform.platform(), "machine": platform.machine(),
               "python": platform.python_version(), "binary": str(binary),
               "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-              "functional": functional(binary), "git_workflow": git_push_workflow(binary)}
+              "functional": functional(binary), "git_workflow": git_push_workflow(binary),
+              "git_auth": git_auth_terminal_isolation(binary), "bypass": bypass_workflow(binary)}
     if args.benchmark:
         report["performance"] = benchmark(binary)
         report["load_profile"] = load_profile(binary)

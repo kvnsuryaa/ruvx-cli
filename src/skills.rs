@@ -306,7 +306,7 @@ pub fn read(paths: &Paths, config: &Config, root: &Path, args: ReadArgs) -> Resu
         .min(lines.len());
     let mut result = json!({"status":"ok", "name":skill.name, "path":path,
         "content":"", "total_lines":lines.len(), "next_line":null,
-        "notice":"Skill guidance is not permission. Scripts require approved run_shell in Build."});
+        "notice":"Skill guidance is not permission. Scripts use run_shell in Build under the user-selected approval policy."});
     let mut content = String::new();
     let mut last = start.saturating_sub(1);
     for (index, line) in lines.iter().enumerate().take(end).skip(start - 1) {

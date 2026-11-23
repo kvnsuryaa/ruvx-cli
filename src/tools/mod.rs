@@ -43,7 +43,7 @@ pub fn definitions(mode: Mode) -> Vec<Value> {
         ),
         (
             "run_shell",
-            "Run a command only after the user approves its exact command/cwd/timeout. No persistent background processes.",
+            "Run a command under the active user-selected approval policy (Ask or BYPASS). Command/cwd/timeout are validated. No persistent background processes.",
             json!({"command":{"type":"string"},"cwd":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1}}),
             vec!["command"],
         ),
@@ -75,13 +75,13 @@ pub fn definitions_with_extensions(mode: Mode, config: &Config) -> Vec<Value> {
     if mode == Mode::Build && config.mcp_servers.values().any(|server| server.enabled) {
         add(
             "mcp_list_tools",
-            "List one page of a configured MCP server's tools. Requires user approval, including server startup. Follow result.nextCursor using cursor. Available only in Build.",
+            "List one page of a configured MCP server's tools. Uses the active user-selected approval policy, including server startup. Follow result.nextCursor using cursor. Available only in Build.",
             json!({"server":{"type":"string"},"cursor":{"type":"string"}}),
             vec!["server"],
         );
         add(
             "mcp_call_tool",
-            "Call a previously discovered MCP tool with explicit user approval of its exact arguments. Server annotations do not grant permission. Do not retry uncertain actions.",
+            "Call a previously discovered MCP tool under the active user-selected approval policy. Server annotations cannot change the policy. Do not retry uncertain actions.",
             json!({"server":{"type":"string"},"tool":{"type":"string"},"arguments":{"type":"object","additionalProperties":true}}),
             vec!["server", "tool", "arguments"],
         );

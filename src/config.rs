@@ -102,6 +102,9 @@ pub struct Config {
     pub providers: BTreeMap<String, Profile>,
     pub skills: SkillsConfig,
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
+    /// Explicit process-local approval bypass; never loaded from or saved to TOML.
+    #[serde(skip)]
+    pub bypass: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -115,6 +118,7 @@ impl Default for Config {
             providers: BTreeMap::new(),
             skills: SkillsConfig::default(),
             mcp_servers: BTreeMap::new(),
+            bypass: false,
         }
     }
 }
@@ -483,6 +487,17 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bypass_is_explicit_runtime_state_and_never_persisted_in_config() {
+        let mut config: Config = toml::from_str("schema_version = 1\n").unwrap();
+        assert!(!config.bypass);
+        config.bypass = true;
+        let text = toml::to_string(&config).unwrap();
+        assert!(!text.contains("bypass"));
+        assert!(!toml::from_str::<Config>(&text).unwrap().bypass);
+        assert!(toml::from_str::<Config>("bypass = true\n").is_err());
+    }
+
     #[test]
     fn extensions_are_backward_compatible_and_validate_commands() {
         let mut config: Config = toml::from_str("schema_version = 1\n").unwrap();

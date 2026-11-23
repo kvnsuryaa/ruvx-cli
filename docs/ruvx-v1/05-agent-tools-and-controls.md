@@ -2,7 +2,7 @@
 
 Agent ruvx bekerja melalui lima tools bawaan. Model meminta tindakan; dispatcher menentukan apakah tindakan valid dan diizinkan. Aturan mode dan persetujuan tetap berlaku walaupun instruksi repo, respons provider, atau hasil tool meminta sebaliknya.
 
-Ekstensi menambahkan `list_skills`/`read_skill` untuk skill lokal pasif serta `mcp_list_tools`/`mcp_call_tool` untuk MCP stdio. Metadata skill masuk ke konteks secara otomatis dengan batas 16 KiB; body/resource dibaca sesuai kebutuhan. MCP hanya tersedia dalam Build dan setiap operasi, termasuk startup/discovery, memerlukan approval. Pengelolaan `/skills` dan `/mcp` saat idle hanya mengubah konfigurasi atas tindakan pengguna; tidak menjalankan model atau server. Lihat [panduan Agent Skills dan MCP](../skills-and-mcp.md) untuk command dan kontrak lengkap.
+Ekstensi menambahkan `list_skills`/`read_skill` untuk skill lokal pasif serta `mcp_list_tools`/`mcp_call_tool` untuk MCP stdio. Metadata skill masuk ke konteks secara otomatis dengan batas 16 KiB; body/resource dibaca sesuai kebutuhan. MCP hanya tersedia dalam Build dan secara default setiap operasi, termasuk startup/discovery, memerlukan approval. Pengguna dapat memilih BYPASS untuk melewati approval shell/MCP selama proses aktif. Pengelolaan `/skills` dan `/mcp` saat idle hanya mengubah konfigurasi atas tindakan pengguna; tidak menjalankan model atau server. Lihat [panduan Agent Skills dan MCP](../skills-and-mcp.md) untuk command dan kontrak lengkap.
 
 ## Siklus satu run
 
@@ -24,9 +24,9 @@ Satu putaran dihitung ketika request generasi mulai dikirim. Model discovery, lo
 | --- | --- | --- |
 | List, search, read | Langsung | Langsung |
 | Metadata dan pembacaan skill lokal | Langsung | Langsung |
-| Operasi MCP, termasuk discovery | Ditolak | Persetujuan per operasi |
+| Operasi MCP, termasuk discovery | Ditolak | Approval per operasi pada Ask; langsung pada BYPASS |
 | Patch file proyek | Ditolak | Langsung setelah validasi |
-| Shell apa pun | Ditolak | Persetujuan per command |
+| Shell apa pun | Ditolak | Approval per command pada Ask; langsung pada BYPASS |
 | Mengubah mode | Hanya intent pengguna saat idle | Hanya intent pengguna saat idle |
 | Menulis metadata aplikasi | Diizinkan oleh operasi aplikasi | Diizinkan oleh operasi aplikasi |
 
@@ -82,7 +82,11 @@ Delete file diperbolehkan di Build dengan prasyarat hash yang sama. Penghapusan 
 
 Default executor menggunakan `/bin/sh` non-interaktif dengan command string dan cwd yang disetujui. Environment proses diwariskan seperti aplikasi lokal biasa; nilai environment tidak dicetak ke log konfigurasi. Shell path dapat diubah lewat konfigurasi pengguna.
 
-Approval mengikat call ID, command, cwd, dan timeout. Pengguna memilih jalankan sekali atau tolak. Jika argumen berubah, diperlukan approval baru. Tidak ada cache izin, allowlist per session, atau persetujuan yang diwariskan dari tool call sebelumnya pada v1.
+Setiap shell memulai session OS baru dengan `setsid`, sehingga `/dev/tty` tidak menunjuk ke terminal TUI; process group untuk cancel/timeout tetap memakai PID shell. `GIT_TERMINAL_PROMPT=0` menonaktifkan prompt username/password Git pada terminal. Kebutuhan kredensial dilaporkan melalui stderr hasil tool dan `auth_hint` bila pesan Git menyebut terminal prompts disabled. Autentikasi dilakukan di terminal terpisah; credential helper dan SSH agent tetap diwariskan. Isolasi terminal ini tidak mengubah izin filesystem/network dan bukan sandbox OS.
+
+Pada kebijakan Ask bawaan, approval mengikat call ID, command, cwd, dan timeout. Pengguna memilih jalankan sekali atau tolak. Jika argumen berubah, diperlukan approval baru. Tidak ada cache izin, allowlist per session, atau persetujuan yang diwariskan dari tool call sebelumnya pada v1.
+
+`--bypass` atau `/bypass on` merupakan pilihan eksplisit pengguna untuk masuk Build dan menjalankan shell/MCP tanpa approval per operasi. `/bypass off` mengaktifkan kembali Ask. Pilihan hanya berada dalam memori proses, ditandai pada header dan jurnal, serta tidak dimuat/disimpan dari TOML. Pergantian session dalam proses yang sama mempertahankan pilihan; restart/resume tanpa flag kembali Ask. Mode Plan tetap menolak shell/MCP, dan timeout/cancel/validasi serta larangan replay outcome tidak pasti tetap berlaku.
 
 Output disalurkan ke UI sebagai event dan ke artefak lokal secara bertahap. Teks yang ditampilkan melewati penyaringan escape sequence terminal agar stdout tool tidak mengambil alih renderer. Exit code bukan nol menjadi hasil tool gagal dengan excerpt yang relevan; model dapat menyesuaikan langkah berikutnya, tetap dalam batas run.
 

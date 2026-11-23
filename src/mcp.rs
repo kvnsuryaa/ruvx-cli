@@ -132,12 +132,16 @@ impl Manager {
             server.inherit_env.join(", "),
             server.timeout_seconds
         );
-        let (respond, answer) = oneshot::channel();
-        tx.send(UiEvent::Approval { review, respond })
-            .await
-            .context("Terminal closed before MCP approval")?;
-        let approved = tokio::select! { biased; _ = cancel.cancelled() => false, answer = answer => answer.unwrap_or(false) };
-        session.record("approval.resolved", json!({"call_id":call.id,"approved":approved,"server":server_id,"method":method,"params":params,"starting":starting}))?;
+        let approved = if config.bypass {
+            !cancel.is_cancelled()
+        } else {
+            let (respond, answer) = oneshot::channel();
+            tx.send(UiEvent::Approval { review, respond })
+                .await
+                .context("Terminal closed before MCP approval")?;
+            tokio::select! { biased; _ = cancel.cancelled() => false, answer = answer => answer.unwrap_or(false) }
+        };
+        session.record("approval.resolved", json!({"call_id":call.id,"approved":approved,"policy":if config.bypass {"bypass"} else {"ask"},"server":server_id,"method":method,"params":params,"starting":starting}))?;
         if !approved {
             return Ok(
                 json!({"status":if cancel.is_cancelled(){"canceled"}else{"denied"},"message":"MCP operation was not executed"}),

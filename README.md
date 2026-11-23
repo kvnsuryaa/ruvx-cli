@@ -1,6 +1,6 @@
 # ruvx
 
-Coding agent terminal berbasis Rust untuk macOS dan Linux. Mulai dengan **Plan** untuk membaca dan memahami proyek, lalu pilih **Build** untuk mengedit. Setiap perintah shell meminta persetujuan pengguna.
+Coding agent terminal berbasis Rust untuk macOS dan Linux. Mulai dengan **Plan** untuk membaca dan memahami proyek, lalu pilih **Build** untuk mengedit. Secara default, setiap perintah shell meminta persetujuan pengguna; BYPASS tersedia sebagai pilihan eksplisit.
 
 ruvx memakai core agent sendiri, TUI fullscreen berfokus pada chat, dan koneksi provider melalui API key atau akun ChatGPT yang memenuhi syarat.
 
@@ -68,7 +68,7 @@ Pesan **USER** memakai background netral tanpa bingkai; jawaban **AI · ruvx** t
 
 Hasil tool tampil sekali, misalnya `read_file → ok [Detail]`; aktivitas berjalan ada di status dan call ID tersedia dalam Detail.
 
-Saat pekerjaan aktif, Enter pada draft hanya menampilkan pengingat untuk menunggu; teks dan blok paste tetap utuh, tanpa mengirim pesan baru atau membatalkan proses. Kirim lagi setelah status kembali `ready`. Approval shell/MCP tetap menggunakan `run` atau `deny`; klik approval berulang dari layar sebelumnya diabaikan. Ctrl+C tetap membatalkan pekerjaan secara eksplisit.
+Saat pekerjaan aktif, Enter pada draft hanya menampilkan pengingat untuk menunggu; teks dan blok paste tetap utuh, tanpa mengirim pesan baru atau membatalkan proses. Kirim lagi setelah status kembali `ready`. Dalam kebijakan Ask, approval shell/MCP menggunakan `run` atau `deny`; klik approval berulang dari layar sebelumnya diabaikan. Ctrl+C tetap membatalkan pekerjaan secara eksplisit.
 
 Saat AI bekerja, indikator di bawah percakapan, tepat di atas area input, hanya menampilkan spinner dan empat informasi: `AI Working, 12s, 2 turns, 1530 total tokens`. Durasi, jumlah turn, dan total token berlaku untuk run aktif dan direset pada run berikutnya, termasuk `/continue`. Total token menjumlahkan usage setiap respons provider; jika `total_tokens` tidak ada, jumlah input dan output yang lengkap digunakan. Sebelum usage tersedia, atau bila ada turn tanpa usage lengkap, tampil `— total tokens`; angka ini bukan estimasi konteks. Indikator tetap bergerak ketika provider atau tool belum menghasilkan output. Menunggu persetujuan memakai label `Waiting for approval`, dan pembatalan memakai `Canceling`, dengan metrik ringkas yang sama. Petunjuk approval ada di dialog; `Ctrl+C cancel` tetap tersedia di footer. Setelah selesai atau gagal, spinner berhenti dan status kembali `ready`. Di editor paste, indikator juga berada di bawah, tepat di atas footer.
 
@@ -94,13 +94,36 @@ Lihat [panduan effort per model](docs/model-efforts.md) untuk konfigurasi, dafta
 ## Workflow
 
 - **Plan:** list/search/read serta pembacaan AGENTS.md, tanpa shell atau edit proyek.
-- **Build:** `/mode build`, kemudian kirim instruksi menerapkan pekerjaan. Patch berjalan langsung; shell menunggu review dan pilihan `run` atau `deny`.
+- **Build:** `/mode build`, kemudian kirim instruksi menerapkan pekerjaan. Patch berjalan langsung; secara default shell menunggu review dan pilihan `run` atau `deny`.
 - **Review:** `/diff` memperlihatkan perubahan yang dicatat session, termasuk proyek tanpa Git. Baseline memakai kondisi sebelum perubahan session, sehingga perubahan pengguna sebelumnya tetap terpisah.
 - **Kelanjutan:** autosave lokal; `/sessions` dan `/resume <id>` melanjutkan tanpa replay tindakan. Dari CLI tersedia `ruvx --resume <id>`.
 - **Konteks panjang:** `/compact` merangkum secara manual sambil menyimpan riwayat asli. ruvx tidak memotong atau merangkum history otomatis.
 - **Run panjang:** default 30 putaran; `/continue` membuka budget baru setelah batas tercapai. `agent.max_turns = 0` menghilangkan batas jumlah putaran.
 
 Tools file membatasi path ke workspace dan mengecualikan data privat aplikasi. Shell yang disetujui berjalan dengan izin OS pengguna; cwd bukan sandbox OS. Review shell mencakup teks workspace yang disnapshot dan menandai cakupan yang dikecualikan.
+
+Proses shell berjalan dalam session OS terpisah tanpa akses ke controlling terminal ruvx. Git memakai `GIT_TERMINAL_PROMPT=0`, sehingga push HTTPS yang memerlukan kredensial gagal dengan pesan autentikasi, alih-alih menanyakan username/password di input chat. Credential helper Git dan SSH agent yang sudah dikonfigurasi tetap dapat dipakai. Untuk GitHub HTTPS, jalankan `gh auth login --hostname github.com --git-protocol https` lalu `gh auth setup-git --hostname github.com` di terminal terpisah sebelum mencoba push kembali. Login provider AI melalui `/connect` terpisah dari autentikasi GitHub untuk Git.
+
+## Mode BYPASS
+
+Aktifkan BYPASS dari terminal untuk langsung masuk Build dan menjalankan shell/MCP tanpa dialog approval:
+
+```sh
+ruvx --bypass /path/ke/proyek
+ruvx --bypass --resume <session-id>
+```
+
+Di dalam TUI saat idle:
+
+```text
+/bypass on
+/bypass off
+/bypass
+```
+
+`on` mengaktifkan Build dan bypass approval; `off` mengembalikan approval untuk operasi berikutnya tanpa mengubah mode Build. `/bypass` menampilkan status. Badge **BYPASS** terlihat di header. Pilihan berlaku untuk proses/window tersebut, termasuk `/new` dan `/resume`, dan tidak disimpan di `config.toml` atau diaktifkan otomatis saat aplikasi dibuka ulang. Jalankan kembali dengan `--bypass` bila diinginkan.
+
+BYPASS mengikuti pembatasan Plan/Build yang aktif, validasi path/schema, timeout, pembatalan, snapshot/diff shell, dan penanganan outcome tidak pasti. Operasi serta kebijakan approval dicatat di jurnal. Model, skill, dan hasil MCP tidak dapat mengubah pilihan BYPASS pengguna.
 
 ## Command dan input
 
@@ -113,6 +136,7 @@ Ketik `/` untuk membuka menu command di atas input; `/m` memfilter `/model`, `/m
 | `/effort [default\|level]`, `/effort levels [...]` | Reasoning effort dan kapabilitas model aktif |
 | `/skills [add\|remove\|enable\|disable]` | Daftar skill dan pengelolaan lokasi skill lokal |
 | `/mcp`, `/mcp add`, `/mcp edit <id>`, `/mcp remove <id>`, `/mcp enable <id>`, `/mcp disable <id>` | Daftar dan konfigurasi MCP stdio tanpa menjalankan server |
+| `/bypass [on\|off]` | Lihat/ubah bypass approval shell dan MCP untuk proses ini |
 | `/mode plan`, `/mode build` | Berpindah mode ketika idle |
 | `/new`, `/sessions`, `/resume <id>` | Pengelolaan session |
 | `/compact` | Ringkasan konteks manual melalui model |
@@ -198,6 +222,6 @@ Fixture private key di `tests/fixtures/` adalah data publik khusus pengujian sig
 ## Agent Skills dan MCP
 
 - **Agent Skills:** simpan `SKILL.md` dengan YAML frontmatter `name` dan `description` di `.agents/skills/<nama>/` proyek atau `~/.config/ruvx/skills/<nama>/` (mengikuti XDG), atau daftarkan folder lokal melalui `/skills add`. Metadata otomatis tersedia bagi agent; body dan resource dibaca saat diperlukan melalui `read_skill`. Katalog dibatasi 16 KiB; `list_skills` menyediakan paging untuk daftar lengkap. `/skills remove` hanya melepas lokasi tambahan, tanpa menghapus sumber. `/skills enable` dan `/skills disable` mengatur discovery global. Script tidak dijalankan otomatis dan skill tidak dapat memperluas izin.
-- **MCP stdio:** gunakan `/mcp add` untuk setup, `/mcp edit <id>` untuk mengubah parameter, serta `/mcp enable|disable|remove <id>` untuk mengelola server. Perubahan tersimpan di config global dan berlaku pada run berikutnya tanpa restart. `/mcp` menampilkan daftar tanpa memulai proses. Dalam Build, agent dapat melakukan discovery dan memanggil tool setelah approval eksplisit untuk setiap operasi. Server berhenti ketika run agent berakhir; outcome terputus memerlukan pemeriksaan dan acknowledgement, bukan replay otomatis.
+- **MCP stdio:** gunakan `/mcp add` untuk setup, `/mcp edit <id>` untuk mengubah parameter, serta `/mcp enable|disable|remove <id>` untuk mengelola server. Perubahan tersimpan di config global dan berlaku pada run berikutnya tanpa restart. `/mcp` menampilkan daftar tanpa memulai proses. Dalam Build, agent dapat melakukan discovery dan memanggil tool; kebijakan Ask meminta approval per operasi, sedangkan BYPASS menjalankannya langsung. Server berhenti ketika run agent berakhir; outcome terputus memerlukan pemeriksaan dan acknowledgement, bukan replay otomatis.
 
 Lihat [panduan Agent Skills dan MCP](docs/skills-and-mcp.md) untuk contoh lengkap, environment, paging, protokol, dan batas keamanan. MCP HTTP, resources/prompts, installer skill, subagent, undo otomatis, headless, dan Windows native belum didukung.

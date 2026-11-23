@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::Parser;
-use ruvx::{config::Paths, session::Session};
+use ruvx::{config::Paths, model::Mode, session::Session};
 use std::{
     io::{self, IsTerminal},
     path::PathBuf,
@@ -9,7 +9,7 @@ use std::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "A small terminal coding agent. Plan first; Build with explicit shell approval."
+    about = "A small terminal coding agent. Plan first; Build with Ask or explicit BYPASS approval policy."
 )]
 struct Cli {
     /// Existing workspace directory (an empty directory is fine for a new project).
@@ -18,6 +18,9 @@ struct Cli {
     /// Resume a saved session; no requests or tools are replayed automatically.
     #[arg(long, value_name = "SESSION_ID")]
     resume: Option<String>,
+    /// Start in Build and skip shell/MCP approvals for this process.
+    #[arg(long)]
+    bypass: bool,
 }
 
 #[tokio::main(worker_threads = 2)]
@@ -37,8 +40,9 @@ async fn start() -> Result<()> {
         "Interactive terminal required. Headless/pipe mode is not supported in v1; use --help for usage."
     );
     let paths = Paths::discover()?;
-    let config = paths.load()?;
-    let session = if let Some(id) = cli.resume {
+    let mut config = paths.load()?;
+    config.bypass = cli.bypass;
+    let mut session = if let Some(id) = cli.resume {
         Session::resume(&paths, &id)?
     } else {
         Session::create(
@@ -47,5 +51,12 @@ async fn start() -> Result<()> {
                 .unwrap_or(std::env::current_dir().context("Cannot read working directory")?),
         )?
     };
+    if cli.bypass {
+        session.set_mode(Mode::Build)?;
+        session.record(
+            "approval.policy_changed",
+            serde_json::json!({"policy":"bypass","source":"cli"}),
+        )?;
+    }
     ruvx::ui::run(paths, config, session).await
 }

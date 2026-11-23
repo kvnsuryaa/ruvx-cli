@@ -26,6 +26,83 @@ impl std::fmt::Display for PartialFailure {
 }
 impl std::error::Error for PartialFailure {}
 
+#[derive(Debug)]
+struct TransientFailure {
+    message: String,
+    notice: &'static str,
+    retry_after: Option<Duration>,
+}
+impl std::fmt::Display for TransientFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+impl std::error::Error for TransientFailure {}
+
+fn transient_identifier(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "server_is_overloaded"
+            | "overloaded_error"
+            | "server_error"
+            | "internal_server_error"
+            | "service_unavailable"
+            | "service_unavailable_error"
+    )
+}
+
+fn retry_delay(config: &Config, retry: u32, retry_after: Option<Duration>) -> Duration {
+    let backoff = Duration::from_secs(
+        config
+            .network
+            .retry_initial_delay_seconds
+            .saturating_mul(1u64 << retry.min(10))
+            .min(60),
+    );
+    backoff.max(retry_after.unwrap_or_default())
+}
+
+fn retryable_connection_cause(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::NotConnected
+            )
+        }) {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
+fn send_failure(error: reqwest::Error) -> anyhow::Error {
+    let timed_out = error.is_timeout();
+    if timed_out
+        || ((error.is_connect() || error.is_request()) && retryable_connection_cause(&error))
+    {
+        let notice = if timed_out {
+            "Provider connection timed out"
+        } else {
+            "Provider connection failed"
+        };
+        return TransientFailure {
+            message: format!("{notice} before a response was received; check network connectivity and provider endpoint availability"),
+            notice,
+            retry_after: None,
+        }.into();
+    }
+    // Builder, TLS certificate, and other unrecognized failures need inspection.
+    error.into()
+}
+
 pub fn client(config: &Config) -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(config.network.header_timeout_seconds))
@@ -188,9 +265,66 @@ pub async fn generate(
     if let Some(token) = &token {
         request = request.bearer_auth(token);
     }
+    for retry in 0..=config.network.max_retries {
+        // The serialized body and credentials are identical on every attempt.
+        let attempt = request
+            .try_clone()
+            .context("Provider request cannot be retried")?;
+        let error = match generate_once(attempt, profile, config, tx, cancel).await {
+            Ok(turn) => return Ok(turn),
+            Err(error) => error,
+        };
+        let Some(failure) = error.downcast_ref::<TransientFailure>() else {
+            return Err(error);
+        };
+        if retry == config.network.max_retries {
+            return Err(error.context(format!(
+                "Automatic provider retries exhausted ({retry} retries)"
+            )));
+        }
+        let delay = retry_delay(config, retry, failure.retry_after);
+        // A longer Retry-After requires an explicit retry, rather than an early
+        // request or an unexpectedly long automatic wait.
+        if delay > Duration::from_secs(60) {
+            return Err(error
+                .context("Provider requested a wait longer than the automatic retry limit (60s)"));
+        }
+        tx.send(UiEvent::Line(format!(
+            "{}; automatic retry {}/{} in {}s. Ctrl+C cancels.",
+            failure.notice,
+            retry + 1,
+            config.network.max_retries,
+            delay.as_secs()
+        )))
+        .await
+        .context("Terminal closed")?;
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => bail!("Request canceled during provider retry wait"),
+            _ = tokio::time::sleep(delay) => {}
+        }
+    }
+    unreachable!("Every provider attempt either succeeds or returns its final error")
+}
+
+async fn generate_once(
+    request: reqwest::RequestBuilder,
+    profile: &Profile,
+    config: &Config,
+    tx: &mpsc::Sender<UiEvent>,
+    cancel: &CancellationToken,
+) -> Result<Turn> {
     let response = tokio::select! {
+        biased;
         _=cancel.cancelled()=>bail!("Request canceled"),
-        response=tokio::time::timeout(Duration::from_secs(config.network.header_timeout_seconds),request.send())=>response.context("Timed out waiting for response headers")??,
+        response=tokio::time::timeout(Duration::from_secs(config.network.header_timeout_seconds),request.send())=>match response {
+            Ok(response) => response.map_err(send_failure)?,
+            Err(_) => return Err(TransientFailure {
+                message: "Provider timed out waiting for response headers; check network connectivity and provider endpoint availability".into(),
+                notice: "Provider timed out waiting for response headers",
+                retry_after: None,
+            }.into()),
+        },
     };
     ensure_success(response.status(), response.headers())?;
     let mut chunks = response.bytes_stream();
@@ -210,6 +344,9 @@ pub async fn generate(
         if turn.completed { break; }
     } Ok(()) }.await;
     if let Err(error) = streamed {
+        if !turn.output_started && error.is::<TransientFailure>() {
+            return Err(error);
+        }
         return Err(PartialFailure {
             text: turn.text.clone(),
             message: format!("{error:#}"),
@@ -245,7 +382,26 @@ fn ensure_success(status: reqwest::StatusCode, headers: &reqwest::header::Header
         }
         _ => "provider availability; retry explicitly",
     };
-    bail!("Provider HTTP {status}: {stage}{retry}")
+    let message = format!("Provider HTTP {status}: {stage}{retry}");
+    if matches!(status.as_u16(), 500 | 502 | 503 | 504) {
+        let retry_after = match headers.get("retry-after") {
+            Some(header) => match header.to_str().ok().and_then(|s| s.parse::<u64>().ok()) {
+                Some(seconds) => Some(Duration::from_secs(seconds)),
+                // Do not retry early when the provider uses an unsupported hint.
+                None => bail!(
+                    "{message}; automatic retry skipped because Retry-After is not a number of seconds"
+                ),
+            },
+            None => None,
+        };
+        return Err(TransientFailure {
+            message,
+            notice: "Provider temporarily unavailable",
+            retry_after,
+        }
+        .into());
+    }
+    bail!("{message}")
 }
 
 pub async fn discover(
@@ -372,6 +528,77 @@ struct PartialCall {
     name: String,
     arguments: String,
 }
+
+fn error_identifier(value: &Value) -> Option<&str> {
+    // Error messages can echo credentials or input. Only display short protocol
+    // identifiers verbatim; never interpolate the provider's message/body.
+    value.as_str().filter(|code| {
+        !code.is_empty()
+            && code.len() <= 100
+            && code
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+    })
+}
+
+fn stream_error(value: &Value) -> anyhow::Error {
+    let error = value
+        .get("error")
+        .filter(|e| !e.is_null())
+        .or_else(|| value.pointer("/response/error").filter(|e| !e.is_null()))
+        .unwrap_or(value);
+    let code = error_identifier(&error["code"]);
+    let kind = error_identifier(&error["type"])
+        .filter(|kind| !matches!(*kind, "error" | "response.failed" | "response.incomplete"));
+    let reason = value
+        .pointer("/response/incomplete_details/reason")
+        .and_then(error_identifier);
+    let mut identifiers = vec![];
+    for (name, identifier) in [("code", code), ("type", kind), ("reason", reason)] {
+        if let Some(identifier) = identifier {
+            identifiers.push(format!("{name}={identifier}"));
+        }
+    }
+    let action = [code, kind, reason].into_iter().flatten().find_map(|identifier| {
+        match identifier {
+            "context_length_exceeded" | "context_window_exceeded" | "max_context_length_exceeded" =>
+                Some("Context capacity exceeded; use /compact or /new, or select a model with a larger context using /model"),
+            "usage_limit_reached" | "rate_limit_exceeded" | "insufficient_quota" | "quota_exceeded" | "subscription_sharing_usage_limit_exceeded" =>
+                Some("Provider usage limit or quota reached; check account usage and retry explicitly after the limit resets or quota is restored"),
+            "invalid_api_key" | "authentication_error" | "token_expired" | "invalid_token" | "unauthorized" | "authentication_required" =>
+                Some("Provider authentication failed; use /connect to reconnect the selected profile"),
+            "permission_denied" | "access_denied" | "forbidden" | "model_access_denied" =>
+                Some("Provider access denied; check account permissions with /connect and model access with /model"),
+            "model_not_found" | "unsupported_model" | "invalid_model" | "unsupported_value" | "unsupported_parameter" | "invalid_request_error" =>
+                Some("Provider rejected the model or request settings; check /model and model capability configuration"),
+            "server_is_overloaded" | "overloaded_error" =>
+                Some("Provider temporarily unavailable due to server overload; retry explicitly later"),
+            "server_error" | "internal_server_error" | "service_unavailable" | "service_unavailable_error" =>
+                Some("Provider temporarily unavailable; retry explicitly later"),
+            "max_output_tokens" => Some("Response reached the output token limit; request a shorter response or check the model output limit"),
+            "content_filter" => Some("Response stopped by the provider content filter; review the request before retrying"),
+            _ => None,
+        }
+    }).unwrap_or("Check provider account, /model, and context settings; retry explicitly after resolving the error");
+    let detail = if identifiers.is_empty() {
+        "unspecified".into()
+    } else {
+        identifiers.join(", ")
+    };
+    let message =
+        format!("Provider error ({detail}): {action}; no incomplete tool calls were executed");
+    if code.or(kind).is_some_and(transient_identifier) {
+        TransientFailure {
+            message,
+            notice: "Provider temporarily unavailable",
+            retry_after: None,
+        }
+        .into()
+    } else {
+        anyhow::anyhow!(message)
+    }
+}
+
 pub struct StreamTurn {
     profile: Profile,
     text: String,
@@ -380,6 +607,7 @@ pub struct StreamTurn {
     finish_reason: bool,
     final_turn: Option<Turn>,
     usage: Option<Value>,
+    output_started: bool,
 }
 impl StreamTurn {
     pub fn new(profile: Profile) -> Self {
@@ -391,6 +619,7 @@ impl StreamTurn {
             finish_reason: false,
             final_turn: None,
             usage: None,
+            output_started: false,
         }
     }
     pub fn event(&mut self, data: &str) -> Result<Option<String>> {
@@ -403,10 +632,37 @@ impl StreamTurn {
             return Ok(None);
         }
         let value: Value = serde_json::from_str(data).context("Invalid provider SSE JSON")?;
-        if !value["error"].is_null() {
-            bail!(
-                "Provider returned a structured error; inspect account, quota, model, and context settings"
+        if !value["error"].is_null()
+            || matches!(
+                value["type"].as_str(),
+                Some("response.failed" | "response.incomplete" | "error")
+            )
+        {
+            return Err(stream_error(&value));
+        }
+        // Lifecycle events are safe to retry. Once any output, tool arguments,
+        // reasoning or usage arrives, preserve the failure for explicit recovery.
+        if self.profile.responses() {
+            self.output_started |= !matches!(
+                value["type"].as_str(),
+                Some("response.created" | "response.in_progress")
             );
+        } else {
+            self.output_started |= value.get("usage").is_some_and(|v| !v.is_null())
+                || value["choices"].as_array().is_some_and(|choices| {
+                    choices.iter().any(|choice| {
+                        !choice["finish_reason"].is_null()
+                            || choice["delta"].as_object().is_some_and(|delta| {
+                                delta.iter().any(|(name, v)| {
+                                    name != "role"
+                                        && !v.is_null()
+                                        && v != ""
+                                        && !v.as_array().is_some_and(Vec::is_empty)
+                                        && !v.as_object().is_some_and(serde_json::Map::is_empty)
+                                })
+                            })
+                    })
+                });
         }
         if self.profile.responses() {
             match value["type"].as_str() {
@@ -464,18 +720,6 @@ impl StreamTurn {
                     });
                     self.completed = true;
                     return Ok(delta);
-                }
-                Some("response.failed" | "response.incomplete" | "error") => {
-                    let code = value
-                        .pointer("/response/error/code")
-                        .and_then(Value::as_str)
-                        .unwrap_or("incomplete_or_failed");
-                    let code: String = code
-                        .chars()
-                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
-                        .take(100)
-                        .collect();
-                    bail!("Response failed ({code}); no incomplete tool calls were executed");
                 }
                 _ => {}
             }
@@ -597,6 +841,184 @@ mod tests {
         }
     }
     #[test]
+    fn transient_io_classification_includes_os_timeouts_but_not_permanent_failures() {
+        // os error 60 is ETIMEDOUT on macOS, the failure reported by the user.
+        #[cfg(target_os = "macos")]
+        assert!(retryable_connection_cause(
+            &std::io::Error::from_raw_os_error(60)
+        ));
+        for kind in [
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::ConnectionReset,
+        ] {
+            assert!(retryable_connection_cause(&std::io::Error::from(kind)));
+        }
+        for kind in [
+            std::io::ErrorKind::InvalidInput,
+            std::io::ErrorKind::InvalidData,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            assert!(!retryable_connection_cause(&std::io::Error::from(kind)));
+        }
+    }
+
+    #[tokio::test]
+    async fn connection_refused_before_response_is_a_retryable_failure() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let config = Config::default();
+        let request = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .post(format!("http://{address}/responses"))
+            .json(&json!({}));
+        let (tx, _rx) = mpsc::channel(8);
+        let error = generate_once(
+            request,
+            &compatible(),
+            &config,
+            &tx,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.is::<TransientFailure>(), "{error:#}");
+        assert!(error.to_string().contains("connection failed"));
+    }
+
+    #[tokio::test]
+    async fn connection_lost_after_partial_text_is_not_retryable() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut reader = tokio::io::BufReader::new(socket);
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).await.unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut socket = reader.into_inner();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 99999\r\nConnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"Partial reply\"}}]}\n\n").await.unwrap();
+            socket.shutdown().await.unwrap();
+        });
+        let request = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/responses"));
+        let (tx, _rx) = mpsc::channel(8);
+        let error = generate_once(
+            request,
+            &compatible(),
+            &Config::default(),
+            &tx,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(!error.is::<TransientFailure>());
+        assert_eq!(
+            error.downcast_ref::<PartialFailure>().unwrap().text,
+            "Partial reply"
+        );
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn retry_backoff_is_bounded_and_respects_retry_after() {
+        let config = Config::default();
+        let delays: Vec<_> = (0..7)
+            .map(|retry| retry_delay(&config, retry, None).as_secs())
+            .collect();
+        assert_eq!(delays, [2, 4, 8, 16, 32, 60, 60]);
+        assert_eq!(
+            retry_delay(&config, 0, Some(Duration::from_secs(9))).as_secs(),
+            9
+        );
+        assert_eq!(
+            retry_delay(&config, 0, Some(Duration::from_secs(61))).as_secs(),
+            61
+        );
+        for status in [500, 502, 503, 504] {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("retry-after", "7".parse().unwrap());
+            let error = ensure_success(reqwest::StatusCode::from_u16(status).unwrap(), &headers)
+                .unwrap_err();
+            assert_eq!(
+                error
+                    .downcast_ref::<TransientFailure>()
+                    .unwrap()
+                    .retry_after,
+                Some(Duration::from_secs(7))
+            );
+            headers.insert("retry-after", "unsupported".parse().unwrap());
+            assert!(
+                !ensure_success(reqwest::StatusCode::from_u16(status).unwrap(), &headers)
+                    .unwrap_err()
+                    .is::<TransientFailure>()
+            );
+        }
+        for status in [400, 401, 403, 404, 422, 429] {
+            assert!(
+                !ensure_success(
+                    reqwest::StatusCode::from_u16(status).unwrap(),
+                    &Default::default()
+                )
+                .unwrap_err()
+                .is::<TransientFailure>()
+            );
+        }
+        for code in [
+            "invalid_api_key",
+            "usage_limit_reached",
+            "context_length_exceeded",
+            "unknown",
+        ] {
+            let error =
+                stream_error(&json!({"error":{"code":code,"type":"service_unavailable_error"}}));
+            assert!(!error.is::<TransientFailure>(), "{code}");
+        }
+    }
+
+    #[test]
+    fn streaming_output_disables_automatic_retry_including_hidden_reasoning_and_tools() {
+        for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+            let mut profile = compatible();
+            profile.kind = kind;
+            let lifecycle = if profile.responses() {
+                json!({"type":"response.created"})
+            } else {
+                json!({"choices":[{"delta":{"role":"assistant","content":""}}]})
+            };
+            let mut turn = StreamTurn::new(profile.clone());
+            turn.event(&lifecycle.to_string()).unwrap();
+            assert!(!turn.output_started);
+            let events = if profile.responses() {
+                vec![
+                    json!({"type":"response.reasoning_text.delta","delta":"hidden"}),
+                    json!({"type":"response.output_item.added","item":{"type":"function_call"}}),
+                ]
+            } else {
+                vec![
+                    json!({"choices":[{"delta":{"reasoning_content":"hidden"}}]}),
+                    json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"read_file","arguments":"{"}}]}}]}),
+                ]
+            };
+            for event in events {
+                let mut turn = StreamTurn::new(profile.clone());
+                turn.event(&event.to_string()).unwrap();
+                assert!(turn.output_started);
+            }
+        }
+    }
+    #[test]
     fn byte_split_utf8_sse() {
         let source = "data: {\"text\":\"你好🙂\"}\r\n\r\n";
         let mut decoder = SseDecoder::default();
@@ -627,6 +1049,102 @@ mod tests {
                 .is_err()
         );
         assert!(broken.finish().is_err());
+    }
+    #[test]
+    fn structured_errors_preserve_identifiers_and_action_without_message_contents() {
+        let cases = [
+            (
+                json!({"error":{"type":"usage_limit_reached","message":"SECRET provider body"}}),
+                "usage_limit_reached",
+                "usage",
+            ),
+            (
+                json!({"error":{"code":"context_length_exceeded","type":"invalid_request_error","message":"SECRET provider body"}}),
+                "context_length_exceeded",
+                "/compact",
+            ),
+            (
+                json!({"type":"error","code":"invalid_api_key","message":"SECRET provider body"}),
+                "invalid_api_key",
+                "/connect",
+            ),
+            (
+                json!({"type":"response.failed","response":{"error":{"code":"model_not_found","message":"SECRET provider body"}}}),
+                "model_not_found",
+                "/model",
+            ),
+            (
+                json!({"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}),
+                "max_output_tokens",
+                "output",
+            ),
+        ];
+        for kind in [
+            ProviderKind::Openai,
+            ProviderKind::Chatgpt,
+            ProviderKind::Compatible,
+        ] {
+            for (event, code, action) in &cases {
+                let mut profile = compatible();
+                profile.kind = kind;
+                let mut turn = StreamTurn::new(profile);
+                let error = turn.event(&event.to_string()).unwrap_err().to_string();
+                assert!(error.contains(code), "{kind:?}: {error}");
+                assert!(error.contains(action), "{kind:?}: {error}");
+                assert!(!error.contains("SECRET"), "{error}");
+                assert!(turn.finish().is_err());
+            }
+        }
+    }
+    #[test]
+    fn overloaded_provider_reports_temporary_unavailability() {
+        for kind in [
+            ProviderKind::Openai,
+            ProviderKind::Chatgpt,
+            ProviderKind::Compatible,
+        ] {
+            for error in [
+                json!({"code":"server_is_overloaded","type":"service_unavailable_error"}),
+                json!({"code":"server_is_overloaded"}),
+                json!({"type":"service_unavailable_error"}),
+            ] {
+                let mut profile = compatible();
+                profile.kind = kind;
+                let mut turn = StreamTurn::new(profile);
+                let message = turn
+                    .event(&json!({"error":error}).to_string())
+                    .unwrap_err()
+                    .to_string();
+                assert!(message.contains("temporarily unavailable"), "{message}");
+                assert!(message.contains("retry explicitly later"), "{message}");
+                assert!(!message.contains("Check provider account"), "{message}");
+                assert!(turn.finish().is_err());
+            }
+        }
+    }
+    #[test]
+    fn structured_error_diagnostics_reject_unsafe_identifiers_and_raw_messages() {
+        for identifier in [
+            "sk-secret-token",
+            "bad\n\u{1b}[2J",
+            "SECRET",
+            &"x".repeat(101),
+        ] {
+            let mut turn = StreamTurn::new(compatible());
+            let event = json!({"error":{"code":identifier,"type":"rate_limit_exceeded","message":"Bearer SECRET provider body"}});
+            let error = turn.event(&event.to_string()).unwrap_err().to_string();
+            assert!(error.contains("type=rate_limit_exceeded"));
+            assert!(!error.contains("code="), "{error}");
+            assert!(!error.contains("SECRET"));
+            assert!(!error.contains('\u{1b}'));
+        }
+        let mut turn = StreamTurn::new(compatible());
+        let error = turn
+            .event(&json!({"error":{"message":"SECRET"}}).to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unspecified"));
+        assert!(!error.contains("SECRET"));
     }
     #[test]
     fn subscription_payload_and_completion_gate() {

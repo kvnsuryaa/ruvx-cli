@@ -6,6 +6,10 @@ use std::collections::BTreeMap;
 use tokio::sync::oneshot;
 
 pub enum UiEvent {
+    FileSuggestions {
+        request: u64,
+        result: Result<Vec<String>, String>,
+    },
     Text(String),
     TurnEnded,
     Line(String),

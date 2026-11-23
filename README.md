@@ -156,8 +156,11 @@ Ketik `/` untuk membuka menu command di atas input; `/m` memfilter `/model`, `/m
 | Shift+Tab | Berganti Plan/Build saat idle; draft tidak dikirim |
 | F6 / Shift+F6, Tab/arrows, Enter | Fokus kontrol berikut/sebelumnya, navigasi, lalu aktifkan; Escape kembali ke input |
 | Escape | Bersihkan seleksi terlebih dahulu; berikutnya tutup review/dialog |
-| `@path`, `@"path dengan spasi"` | Lampirkan file secara eksplisit |
+| `@path`, `@"path dengan spasi"` | Lampirkan file secara eksplisit; ketik `@` untuk mencari file workspace |
+| ↑/↓, Tab/Enter, Escape di menu `@` | Pilih file, masukkan path tanpa mengirim prompt, tutup menu |
 | Awalan `//` | Kirim teks yang dimulai `/` |
+
+Saat idle, ketik `@` di awal prompt atau setelah whitespace untuk membuka pencarian file, misalnya `Jelaskan @src/main.rs` atau `Bandingkan @src/agent.rs dengan @src/context.rs`. Menu memfilter nama/path (tanpa membedakan huruf besar-kecil), menampilkan maksimal 100 kecocokan, dan mengikuti ignore rules serta pembatasan workspace. Ketik lebih banyak untuk mempersempit hasil; gunakan ↑/↓ atau wheel untuk memilih, lalu Tab/Enter atau klik untuk memasukkan path. Path dengan spasi otomatis diberi tanda kutip. Saat menu terbuka, Enter hanya memilih file; lanjutkan kalimat atau tutup dengan Escape sebelum mengirim prompt. Email dan isi code fence tidak memicu menu. File ignored tetap dapat dilampirkan dengan path eksplisit setelah menutup menu. Isi lampiran mengikuti batas pembacaan file yang dikonfigurasi (hasil terpotong ditandai); jika pembacaan gagal, pesan tidak dikirim dan draft dipertahankan.
 
 Riwayat digulir di dalam aplikasi dan tetap tersedia sesudah `/compact` serta resume. Saat membaca bagian lama, streaming tidak menarik layar ke bawah. Klik `[Detail]` untuk hasil tool; `/diff` dan `/help` membuka review yang dapat digulir. Pada review shell panjang, baca sampai bagian bawah sebelum menyetujui; pilihan awal selalu **Deny**.
 
@@ -221,7 +224,7 @@ Fixture private key di `tests/fixtures/` adalah data publik khusus pengujian sig
 
 ## Agent Skills dan MCP
 
-- **Agent Skills:** simpan `SKILL.md` dengan YAML frontmatter `name` dan `description` di `.agents/skills/<nama>/` proyek atau `~/.config/ruvx/skills/<nama>/` (mengikuti XDG), atau daftarkan folder lokal melalui `/skills add`. Metadata otomatis tersedia bagi agent; body dan resource dibaca saat diperlukan melalui `read_skill`. Katalog dibatasi 16 KiB; `list_skills` menyediakan paging untuk daftar lengkap. `/skills remove` hanya melepas lokasi tambahan, tanpa menghapus sumber. `/skills enable` dan `/skills disable` mengatur discovery global. Script tidak dijalankan otomatis dan skill tidak dapat memperluas izin.
+- **Agent Skills:** simpan `SKILL.md` dengan YAML frontmatter `name` dan `description` di `.agents/skills/<nama>/` proyek, `~/.agents/skills/<nama>/`, atau `~/.config/ruvx/skills/<nama>/` (mengikuti XDG untuk config ruvx), atau daftarkan folder lokal melalui `/skills add`. Metadata otomatis tersedia bagi agent; body dan resource dibaca saat diperlukan melalui `read_skill`. Katalog dibatasi 16 KiB; `list_skills` menyediakan paging untuk daftar lengkap. `/skills remove` hanya melepas lokasi tambahan, tanpa menghapus sumber. `/skills enable` dan `/skills disable` mengatur discovery global. Script tidak dijalankan otomatis dan skill tidak dapat memperluas izin.
 - **MCP stdio:** gunakan `/mcp add` untuk setup, `/mcp edit <id>` untuk mengubah parameter, serta `/mcp enable|disable|remove <id>` untuk mengelola server. Perubahan tersimpan di config global dan berlaku pada run berikutnya tanpa restart. `/mcp` menampilkan daftar tanpa memulai proses. Dalam Build, agent dapat melakukan discovery dan memanggil tool; kebijakan Ask meminta approval per operasi, sedangkan BYPASS menjalankannya langsung. Server berhenti ketika run agent berakhir; outcome terputus memerlukan pemeriksaan dan acknowledgement, bukan replay otomatis.
 
 Lihat [panduan Agent Skills dan MCP](docs/skills-and-mcp.md) untuk contoh lengkap, environment, paging, protokol, dan batas keamanan. MCP HTTP, resources/prompts, installer skill, subagent, undo otomatis, headless, dan Windows native belum didukung.

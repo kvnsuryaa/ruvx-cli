@@ -5,10 +5,13 @@ mod composer;
 mod deletion;
 mod editor;
 mod extensions;
+mod file_menu;
 mod git;
+mod mcp_browser;
 mod paste_editor;
 mod preferences;
 mod screen;
+mod skill_browser;
 mod transcript;
 use crate::{
     agent::{self, Action},
@@ -260,6 +263,7 @@ struct App {
     selection: Option<Selection>,
     editor: Editor,
     command_menu: commands::Menu,
+    file_menu: file_menu::Menu,
     dialog: Dialog,
     status: String,
     active: Option<CancellationToken>,
@@ -268,6 +272,8 @@ struct App {
     lines: VecDeque<String>,
     transcript: Transcript,
     overlay: Option<Overlay>,
+    skill_browser: Option<skill_browser::Browser>,
+    mcp_browser: Option<mcp_browser::Browser>,
     streaming: Option<usize>,
     frame: FrameMap,
     gesture: Option<Gesture>,
@@ -350,6 +356,7 @@ impl App {
             selection,
             editor: Editor::default(),
             command_menu: commands::Menu::default(),
+            file_menu: file_menu::Menu::default(),
             dialog: Dialog::None,
             status: "ready".into(),
             active: None,
@@ -358,6 +365,8 @@ impl App {
             lines,
             transcript,
             overlay: None,
+            skill_browser: None,
+            mcp_browser: None,
             streaming: None,
             frame: FrameMap::default(),
             gesture: None,
@@ -432,6 +441,12 @@ impl App {
         Ok(true)
     }
     fn cancel(&mut self) {
+        if self.mcp_browser.take().is_some() {
+            return;
+        }
+        if self.skill_browser.take().is_some() {
+            return;
+        }
         self.overlay = None;
         self.gesture = None;
         if let Some(token) = &self.active {
@@ -1157,6 +1172,18 @@ impl App {
         {
             return Ok(());
         }
+        if let Some(browser) = &mut self.mcp_browser {
+            if browser.key(key) {
+                self.mcp_browser = None;
+            }
+            return Ok(());
+        }
+        if let Some(browser) = &mut self.skill_browser {
+            if browser.key(key) {
+                self.skill_browser = None;
+            }
+            return Ok(());
+        }
         if self.paste_editor.is_some() {
             if key.code == KeyCode::Esc {
                 self.paste_editor = None;
@@ -1211,6 +1238,9 @@ impl App {
             {
                 self.open_paste(paste.id)?;
             }
+            return Ok(());
+        }
+        if self.file_key(key) {
             return Ok(());
         }
         if self.command_key(key, height)? {
@@ -1393,6 +1423,9 @@ impl App {
     }
     fn event(&mut self, event: UiEvent, height: u16) -> Result<()> {
         match event {
+            UiEvent::FileSuggestions { request, result } => {
+                self.file_suggestions_finished(request, result);
+            }
             UiEvent::PreflightFinished {
                 session,
                 revision,

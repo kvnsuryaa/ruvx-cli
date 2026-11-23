@@ -86,12 +86,11 @@ pub fn register(paths: &Paths, config: &mut Config, root: &Path, input: &Path) -
         .canonicalize()
         .context("Cannot access skill location")?;
     ensure!(path.is_dir(), "Skill location must be a directory");
-    let mut existing = vec![paths.config.join("skills"), root.join(".agents/skills")];
-    existing.extend(config.skills.paths.iter().cloned());
+    let existing = locations(paths, config, root);
     ensure!(
         !existing
             .iter()
-            .any(|p| p.canonicalize().ok().as_ref() == Some(&path)),
+            .any(|(p, _)| p.canonicalize().ok().as_ref() == Some(&path)),
         "Skill location is already registered or is a built-in location"
     );
     config.skills.paths.push(path);
@@ -122,13 +121,12 @@ fn load_skill(directory: &Path, base: &Path, source: &'static str, limit: usize)
     })
 }
 
-pub fn discover(paths: &Paths, config: &Config, root: &Path) -> Result<(Vec<Skill>, Vec<String>)> {
-    if !config.skills.enabled {
-        return Ok((vec![], vec![]));
-    }
-    let mut skills = BTreeMap::new();
-    let mut warnings = vec![];
-    let mut locations = vec![(paths.config.join("skills"), "user")];
+/// Discovery roots in increasing priority, also used by registration and the UI.
+pub fn locations(paths: &Paths, config: &Config, root: &Path) -> Vec<(PathBuf, &'static str)> {
+    let mut locations = vec![
+        (paths.home.join(".agents/skills"), "user"),
+        (paths.config.join("skills"), "user"),
+    ];
     locations.extend(
         config
             .skills
@@ -138,8 +136,17 @@ pub fn discover(paths: &Paths, config: &Config, root: &Path) -> Result<(Vec<Skil
             .map(|path| (path, "custom")),
     );
     locations.push((root.join(".agents/skills"), "project"));
+    locations
+}
+
+pub fn discover(paths: &Paths, config: &Config, root: &Path) -> Result<(Vec<Skill>, Vec<String>)> {
+    if !config.skills.enabled {
+        return Ok((vec![], vec![]));
+    }
+    let mut skills = BTreeMap::new();
+    let mut warnings = vec![];
     // Later entries replace earlier names; the project always has highest priority.
-    for (location, source) in locations {
+    for (location, source) in locations(paths, config, root) {
         let scan = (|| -> Result<()> {
             let base = location.canonicalize()?;
             ensure!(base.is_dir(), "Skill location must be a directory");
@@ -344,6 +351,58 @@ pub fn read(paths: &Paths, config: &Config, root: &Path, args: ReadArgs) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_agents_skills_are_discovered_readable_and_have_lowest_priority() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let paths = Paths::at(&root.join("isolated-xdg"));
+        let home_skills = paths.home.join(".agents/skills");
+        write_skill(&home_skills, "demo", "shared home skill");
+        let mut config = Config::default();
+        let (skills, warnings) = discover(&paths, &config, &root).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].directory, home_skills.join("demo"));
+        assert!(
+            catalog(&paths, &config, &root)
+                .unwrap()
+                .contains("shared home skill")
+        );
+        let result = read(
+            &paths,
+            &config,
+            &root,
+            ReadArgs {
+                name: "demo".into(),
+                file: None,
+                start_line: None,
+                end_line: None,
+            },
+        )
+        .unwrap();
+        assert!(result.to_string().contains("shared home skill"));
+        assert!(register(&paths, &mut config, &root, &home_skills).is_err());
+        write_skill(&paths.config.join("skills"), "demo", "ruvx user skill");
+        assert_eq!(
+            discover(&paths, &config, &root).unwrap().0[0].description,
+            "ruvx user skill"
+        );
+        let custom = root.join("custom");
+        write_skill(&custom, "demo", "custom skill");
+        register(&paths, &mut config, &root, &custom).unwrap();
+        assert_eq!(
+            discover(&paths, &config, &root).unwrap().0[0].description,
+            "custom skill"
+        );
+        write_skill(&root.join(".agents/skills"), "demo", "project skill");
+        assert_eq!(
+            discover(&paths, &config, &root).unwrap().0[0].description,
+            "project skill"
+        );
+        config.skills.enabled = false;
+        assert!(discover(&paths, &config, &root).unwrap().0.is_empty());
+    }
 
     #[test]
     fn custom_locations_precedence_registration_and_missing_locations() {

@@ -12,6 +12,7 @@ use crate::session::{atomic_write, private_dir};
 
 #[derive(Clone, Debug)]
 pub struct Paths {
+    pub home: PathBuf,
     pub config: PathBuf,
     pub data: PathBuf,
     pub cache: PathBuf,
@@ -35,10 +36,12 @@ impl Paths {
             config: xdg("XDG_CONFIG_HOME", home.join(".config"))?,
             data: xdg("XDG_DATA_HOME", home.join(".local/share"))?,
             cache: xdg("XDG_CACHE_HOME", home.join(".cache"))?,
+            home,
         })
     }
     pub fn at(root: &Path) -> Self {
         Self {
+            home: root.join("home"),
             config: root.join("config"),
             data: root.join("data"),
             cache: root.join("cache"),
@@ -231,6 +234,8 @@ pub struct NetworkConfig {
     pub header_timeout_seconds: u64,
     pub chunk_timeout_seconds: u64,
     pub request_timeout_seconds: u64,
+    pub max_retries: u32,
+    pub retry_initial_delay_seconds: u64,
 }
 impl Default for NetworkConfig {
     fn default() -> Self {
@@ -238,6 +243,8 @@ impl Default for NetworkConfig {
             header_timeout_seconds: 60,
             chunk_timeout_seconds: 120,
             request_timeout_seconds: 600,
+            max_retries: 3,
+            retry_initial_delay_seconds: 2,
         }
     }
 }
@@ -406,6 +413,11 @@ impl Config {
                 && self.network.request_timeout_seconds > 0,
             "Network timeouts must be positive"
         );
+        ensure!(
+            self.network.max_retries <= 10
+                && (1..=60).contains(&self.network.retry_initial_delay_seconds),
+            "network.max_retries must be 0..10 and retry_initial_delay_seconds must be 1..60"
+        );
         ensure!(self.skills.paths.iter().all(|path| path.is_absolute()
             && !path.as_os_str().as_encoded_bytes().contains(&0)),
             "Skill paths must be absolute and must not contain NUL");
@@ -488,6 +500,21 @@ impl Config {
 mod tests {
     use super::*;
     #[test]
+    fn provider_retry_defaults_and_limits_are_validated() {
+        let mut config: Config = toml::from_str("schema_version = 1\n").unwrap();
+        assert_eq!(config.network.max_retries, 3);
+        assert_eq!(config.network.retry_initial_delay_seconds, 2);
+        config.network.max_retries = 0;
+        config.validate().unwrap();
+        config.network.max_retries = 11;
+        assert!(config.validate().is_err());
+        config.network.max_retries = 3;
+        for delay in [0, 61] {
+            config.network.retry_initial_delay_seconds = delay;
+            assert!(config.validate().is_err());
+        }
+    }
+    #[test]
     fn bypass_is_explicit_runtime_state_and_never_persisted_in_config() {
         let mut config: Config = toml::from_str("schema_version = 1\n").unwrap();
         assert!(!config.bypass);
@@ -543,6 +570,7 @@ mod tests {
         )
         .unwrap();
         let paths = Paths {
+            home: base.join("home"),
             config: app_directory(&base.join("config")),
             data: app_directory(&base.join("data")),
             cache: app_directory(&base.join("cache")),

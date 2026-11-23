@@ -66,6 +66,8 @@ Nama berikut merupakan spesifikasi pengaturan, bukan file config yang dibuat pad
 | `network.header_timeout_seconds` | 60; positif | Waktu menunggu header response. |
 | `network.chunk_timeout_seconds` | 120; positif | Maksimum jeda antar-event stream. |
 | `network.request_timeout_seconds` | 600; positif | Batas keseluruhan satu request generasi. |
+| `network.max_retries` | 3; 0–10 | Retry otomatis request generasi yang ditolak sementara sebelum keluaran; 0 menonaktifkan. |
+| `network.retry_initial_delay_seconds` | 2; 1–60 | Jeda awal retry, berlipat dua hingga 60 detik; Ctrl+C membatalkan. |
 | `providers.<id>` | ID unik dan stabil | Profil, protokol, endpoint, auth reference, dan model inventory. |
 | `providers.<id>.models.<id>.context_limit` | Opsional, integer positif | Limit eksplisit jika tidak tersedia dari metadata. |
 | `providers.<id>.models.<id>.output_reserve_tokens` | 4096; harus lebih kecil dari limit yang diketahui | Cadangan estimasi konteks; bukan parameter wire universal. |

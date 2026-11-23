@@ -316,6 +316,8 @@ def events(data_root):
 def fixture_env(root, port):
     workspace = root / "project"
     workspace.mkdir()
+    home = root / "home"
+    home.mkdir()
     config, data, cache = (root / name for name in ("config", "data", "cache"))
     (config / "ruvx").mkdir(parents=True)
     (config / "ruvx" / "config.toml").write_text(f'''schema_version = 1
@@ -329,7 +331,7 @@ supports_tools = true
 context_limit = 16384
 output_reserve_tokens = 256
 ''')
-    env = dict(os.environ, TERM="xterm-256color", SSH_TTY="fixture-osc52-no-system-clipboard", XDG_CONFIG_HOME=str(config),
+    env = dict(os.environ, HOME=str(home), TERM="xterm-256color", SSH_TTY="fixture-osc52-no-system-clipboard", XDG_CONFIG_HOME=str(config),
                XDG_DATA_HOME=str(data), XDG_CACHE_HOME=str(cache))
     return workspace, config, data, env
 
@@ -396,6 +398,16 @@ def functional(binary):
             steps.append("slash filtering, required argument, Tab completion, Escape/edit, 48x16 and help click without inference")
 
             # Configure extensions in Plan before any model is selected. No code is run.
+            home_skill = Path(env["HOME"]) / ".agents" / "skills" / "a-home"
+            home_skill.mkdir(parents=True)
+            (home_skill / "SKILL.md").write_text("---\nname: a-home\ndescription: Home skill discovered automatically\n---\nPassive guidance.\n")
+            terminal.enter("/skills")
+            terminal.wait(lambda: "a-home [user]" in terminal.grid.text(), "automatic HOME/.agents/skills discovery with independent XDG config")
+            assert "Home skill discovered automatically" in terminal.grid.text()
+            assert not server.requests, "Home skill discovery started inference"
+            terminal.send("\x1b")
+            terminal.pump(.1)
+            steps.append("automatic HOME/.agents/skills discovery independent of XDG configuration and without inference")
             skill = root / "shared skills" / "demo"
             skill.mkdir(parents=True)
             (skill / "SKILL.md").write_text("---\nname: demo\ndescription: PTY skill fixture\n---\nRead only when relevant.\n")
@@ -409,9 +421,26 @@ def functional(binary):
             terminal.enter(str(skill))
             assert extension_config()["skills"]["paths"] == [str(skill.resolve())]
             terminal.enter("/skills")
-            terminal.wait(lambda: "demo [custom]" in terminal.grid.text(), "registered skill without restart")
+            terminal.wait(lambda: "Agent Skills" in terminal.grid.text() and "Search:" in terminal.grid.text(), "searchable skill browser")
+            terminal.send("PTY")  # Search descriptions as well as skill names, case-insensitively.
+            terminal.wait(lambda: "demo [custom]" in terminal.grid.text() and "1 of 2 skills" in terminal.grid.text(), "registered skill search without restart")
+            terminal.send("\r")
+            terminal.wait(lambda: "Skill details" in terminal.grid.text() and "PTY skill fixture" in terminal.grid.text(), "expanded skill metadata")
             terminal.send("\x1b")
             terminal.pump(.1)
+            terminal.send("\t")
+            terminal.wait(lambda: "Discovery locations" in terminal.grid.text(), "separate discovery locations")
+            terminal.send("\t")
+            terminal.wait(lambda: "No warnings." in terminal.grid.text(), "separate discovery warnings")
+            terminal.resize(48, 16)
+            terminal.pump(.1)
+            assert "Warnings" in terminal.grid.text()
+            terminal.send("\x1b")
+            terminal.pump(.1)
+            terminal.resize(100, 40)
+            terminal.pump(.1)
+            assert not server.requests, "Skill browser started inference"
+            steps.append("searchable skills, expanded metadata, locations/warnings tabs and 48x16 layout without inference")
             terminal.enter("/skills disable")
             assert extension_config()["skills"]["enabled"] is False
             terminal.enter("/skills enable")
@@ -585,6 +614,28 @@ def functional(binary):
             terminal.wait(lambda: "SLASH_LITERAL_OK" in terminal.grid.text(), "literal slash in large paste")
             terminal.wait(terminal.idle, "agent returns session and becomes ready")
             assert server.requests[-1]["messages"][-1]["content"] == literal
+            before_error = len(server.requests)
+            failure = {"error": {"type": "usage_limit_reached", "message": "PROVIDER_SECRET_BODY"}}
+            server.replies.put(("data: " + json.dumps(failure) + "\n\n", 0))
+            terminal.enter("Test provider diagnostics")
+            terminal.wait(lambda: "usage_limit_reached" in terminal.grid.text(), "structured provider error identifier")
+            terminal.wait(terminal.idle, "provider failure stops the activity indicator")
+            assert "account usage" in terminal.grid.text()
+            assert b"PROVIDER_SECRET_BODY" not in terminal.output
+            assert len(server.requests) == before_error + 1, "Provider failure retried automatically"
+            steps.append("structured provider error shows safe identifier and account usage guidance, stops activity and does not retry")
+            before_retry = len(server.requests)
+            overload = {"error": {"code": "server_is_overloaded", "type": "service_unavailable_error"}}
+            server.replies.put(("data: " + json.dumps(overload) + "\n\n", 0))
+            server.replies.put((completion("AUTOMATIC_RETRY_OK"), 0))
+            terminal.enter("Recover from provider overload")
+            terminal.wait(lambda: "automatic retry 1/3 in 2s" in terminal.grid.text(), "visible provider retry wait")
+            assert "AI Working" in terminal.activity_row()[1]
+            terminal.wait(lambda: "AUTOMATIC_RETRY_OK" in terminal.grid.text(), "automatic recovery from provider overload")
+            terminal.wait(terminal.idle, "recovered provider run completes")
+            assert len(server.requests) == before_retry + 2
+            assert server.requests[-1] == server.requests[-2], "Retry changed the request"
+            steps.append("provider overload retries automatically with visible delay, active bottom spinner and identical request")
             steps.append("large paste preview/edit/save, exact full payload, user-only fold/expand, literal slash and compact usage")
 
             terminal.enter("/mode build")

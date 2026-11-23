@@ -26,17 +26,27 @@ use tokio_util::sync::CancellationToken;
 #[derive(Default)]
 struct MockState {
     replies: Mutex<VecDeque<String>>,
+    http_failures: Mutex<VecDeque<(StatusCode, Option<&'static str>)>>,
+    header_delays: Mutex<VecDeque<std::time::Duration>>,
     requests: Mutex<Vec<Value>>,
     progress: Mutex<Vec<(u32, Option<u64>)>>,
+    notices: Mutex<Vec<String>>,
 }
 async fn inference(
     State(state): State<Arc<MockState>>,
     headers: HeaderMap,
     Json(body): Json<Value>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     assert_eq!(headers.get("authorization").unwrap(), "Bearer fixture-key");
     state.requests.lock().unwrap().push(body);
-    match state.replies.lock().unwrap().pop_front() {
+    if let Some((status, retry_after)) = state.http_failures.lock().unwrap().pop_front() {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = retry_after {
+            headers.insert("retry-after", value.parse().unwrap());
+        }
+        return (status, headers, "fixture HTTP error").into_response();
+    }
+    let reply = match state.replies.lock().unwrap().pop_front() {
         Some(reply) => (
             StatusCode::OK,
             [("content-type", "text/event-stream")],
@@ -48,6 +58,12 @@ async fn inference(
             "Unexpected request".into(),
         ),
     }
+    .into_response();
+    let delay = state.header_delays.lock().unwrap().pop_front();
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
+    reply
 }
 struct Fixture {
     _temp: tempfile::TempDir,
@@ -200,6 +216,7 @@ impl Fixture {
                     break;
                 }
                 UiEvent::Line(line) => {
+                    self.state.notices.lock().unwrap().push(line.clone());
                     if let Some((name, _)) = line.trim_start().split_once(" · ") {
                         assert!(
                             !matches!(
@@ -498,6 +515,293 @@ async fn failed_terminal_event_never_executes_partial_tools() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn overloaded_request_retries_same_turn_then_completes_without_replaying_tools() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        let mut f = Fixture::new(kind).await;
+        f.config.network.retry_initial_delay_seconds = 1;
+        let mut session = f.session();
+        session.set_mode(Mode::Build).unwrap();
+        // The initial request executes a tool once. Only the next inference is retried.
+        f.reply(
+            "",
+            vec![(
+                "write-once",
+                "run_shell",
+                json!({"command":"printf x >> marker"}),
+            )],
+        );
+        let failure =
+            json!({"error":{"code":"server_is_overloaded","type":"service_unavailable_error"}});
+        f.state
+            .replies
+            .lock()
+            .unwrap()
+            .push_back(format!("data: {failure}\n\n"));
+        f.reply("Recovered", vec![]);
+        let (session, error) = f
+            .run(session, Action::Message("Do the work".into()), vec![true])
+            .await;
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(fs::read_to_string(f.root.join("marker")).unwrap(), "x");
+        let requests = f.state.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[1], requests[2]);
+        let events = fs::read_to_string(session.dir.join("events.jsonl")).unwrap();
+        assert_eq!(events.matches("\"kind\":\"turn.started\"").count(), 2);
+        assert!(
+            session
+                .history()
+                .unwrap()
+                .iter()
+                .any(|(_, m)| matches!(m, Message::Assistant { turn } if turn.text == "Recovered"))
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn provider_retries_are_bounded_and_can_be_disabled() {
+    for max_retries in [0, 2] {
+        let mut f = Fixture::new(ProviderKind::Compatible).await;
+        f.config.network.max_retries = max_retries;
+        f.config.network.retry_initial_delay_seconds = 1;
+        let failure = json!({"error":{"code":"server_is_overloaded"}});
+        for _ in 0..=max_retries {
+            f.state
+                .replies
+                .lock()
+                .unwrap()
+                .push_back(format!("data: {failure}\n\n"));
+        }
+        let (_, error) = f
+            .run(f.session(), Action::Message("Inspect".into()), vec![])
+            .await;
+        let error = error.unwrap();
+        assert!(error.contains("server_is_overloaded"));
+        assert_eq!(
+            f.state.requests.lock().unwrap().len(),
+            max_retries as usize + 1
+        );
+        assert_eq!(f.state.notices.lock().unwrap().len(), max_retries as usize);
+        if max_retries > 0 {
+            assert!(error.contains("retries exhausted"), "{error}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn overload_after_partial_output_or_tools_is_never_retried() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        let events = if kind == ProviderKind::Openai {
+            vec![
+                json!({"type":"response.output_text.delta","delta":"Partial"}),
+                json!({"type":"response.output_item.added","item":{"type":"function_call","name":"run_shell"}}),
+                json!({"type":"response.reasoning_text.delta","delta":"hidden"}),
+            ]
+        } else {
+            vec![
+                json!({"choices":[{"delta":{"content":"Partial"}}]}),
+                json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"run_shell","arguments":"{"}}]}}]}),
+                json!({"choices":[{"delta":{"reasoning_content":"hidden"}}]}),
+            ]
+        };
+        for event in events {
+            let f = Fixture::new(kind).await;
+            let failure = json!({"error":{"code":"server_is_overloaded"}});
+            f.state
+                .replies
+                .lock()
+                .unwrap()
+                .push_back(format!("data: {event}\n\ndata: {failure}\n\n"));
+            let (session, error) = f
+                .run(f.session(), Action::Message("Inspect".into()), vec![])
+                .await;
+            assert!(error.unwrap().contains("server_is_overloaded"));
+            assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+            assert!(f.state.notices.lock().unwrap().is_empty());
+            assert!(session.pending_tools.is_empty());
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn provider_http_retry_respects_limits_and_permanent_errors() {
+    for status in [
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::BAD_GATEWAY,
+        StatusCode::GATEWAY_TIMEOUT,
+    ] {
+        let mut f = Fixture::new(ProviderKind::Openai).await;
+        f.config.network.retry_initial_delay_seconds = 1;
+        f.state
+            .http_failures
+            .lock()
+            .unwrap()
+            .push_back((status, Some("0")));
+        f.reply("Recovered", vec![]);
+        let (_, error) = f
+            .run(f.session(), Action::Message("Inspect".into()), vec![])
+            .await;
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(f.state.requests.lock().unwrap().len(), 2);
+    }
+    for (status, retry_after) in [
+        (StatusCode::UNAUTHORIZED, None),
+        (StatusCode::TOO_MANY_REQUESTS, None),
+        (StatusCode::SERVICE_UNAVAILABLE, Some("61")),
+        (StatusCode::SERVICE_UNAVAILABLE, Some("invalid")),
+    ] {
+        let f = Fixture::new(ProviderKind::Compatible).await;
+        f.state
+            .http_failures
+            .lock()
+            .unwrap()
+            .push_back((status, retry_after));
+        let (_, error) = f
+            .run(f.session(), Action::Message("Inspect".into()), vec![])
+            .await;
+        assert!(error.is_some());
+        assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+        assert!(f.state.notices.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_and_header_timeouts_retry_identical_inference_before_output() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        for request_timeout in [false, true] {
+            let mut f = Fixture::new(kind).await;
+            f.config.network.retry_initial_delay_seconds = 1;
+            f.config.network.header_timeout_seconds = if request_timeout { 5 } else { 1 };
+            f.config.network.request_timeout_seconds = if request_timeout { 1 } else { 5 };
+            f.state
+                .header_delays
+                .lock()
+                .unwrap()
+                .push_back(std::time::Duration::from_secs(2));
+            f.reply("Stale reply", vec![]);
+            f.reply("Recovered from timeout", vec![]);
+            let (session, error) = f
+                .run(f.session(), Action::Message("Inspect".into()), vec![])
+                .await;
+            assert!(
+                error.is_none(),
+                "{kind:?}, request timeout={request_timeout}: {error:?}"
+            );
+            let requests = f.state.requests.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert_eq!(requests[0], requests[1]);
+            let notices = f.state.notices.lock().unwrap();
+            assert_eq!(notices.len(), 1);
+            assert!(notices[0].contains("timed out"), "{notices:?}");
+            assert!(notices[0].contains("automatic retry 1/3 in 1s"));
+            let history = session.history().unwrap();
+            assert!(history.iter().any(|(_, m)| matches!(m, Message::Assistant { turn } if turn.text == "Recovered from timeout")));
+            assert!(!history.iter().any(|(_, m)| matches!(m, Message::Assistant { turn } if turn.text.contains("Stale reply"))));
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connection_retry_is_bounded_and_has_network_specific_guidance() {
+    let mut f = Fixture::new(ProviderKind::Compatible).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    f.config.providers.get_mut("mock").unwrap().base_url = Some(format!("http://{address}/v1"));
+    f.config.network.max_retries = 1;
+    f.config.network.retry_initial_delay_seconds = 1;
+    let (_, error) = f
+        .run(f.session(), Action::Message("Inspect".into()), vec![])
+        .await;
+    let error = error.unwrap();
+    assert!(error.contains("retries exhausted (1 retries)"), "{error}");
+    assert!(error.contains("connection failed"), "{error}");
+    assert!(error.contains("network connectivity"), "{error}");
+    assert_eq!(f.state.notices.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn provider_retry_wait_can_be_canceled_before_sending_another_request() {
+    let mut f = Fixture::new(ProviderKind::Compatible).await;
+    f.config.network.retry_initial_delay_seconds = 30;
+    let failure = json!({"error":{"type":"service_unavailable_error"}});
+    f.state
+        .replies
+        .lock()
+        .unwrap()
+        .push_back(format!("data: {failure}\n\n"));
+    let (tx, mut rx) = mpsc::channel(64);
+    let cancel = CancellationToken::new();
+    let selection = Selection {
+        profile: "mock".into(),
+        model: "model".into(),
+    };
+    let history = vec![Message::user("Inspect")];
+    let request = ruvx::provider::generate(
+        &f.paths,
+        &f.config,
+        &selection,
+        ruvx::provider::GenerateInput {
+            history: &history,
+            instructions: "test",
+            tools: &[],
+        },
+        &tx,
+        &cancel,
+    );
+    tokio::pin!(request);
+    tokio::select! {
+        result = &mut request => panic!("Request stopped before its retry wait: {result:?}"),
+        notice = rx.recv() => assert!(matches!(notice, Some(UiEvent::Line(line)) if line.contains("retry 1/3 in 30s"))),
+    }
+    cancel.cancel();
+    let error = tokio::time::timeout(std::time::Duration::from_secs(1), request)
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("canceled during provider retry wait")
+    );
+    assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn structured_stream_error_keeps_partial_text_and_reports_safe_diagnostic() {
+    for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
+        let f = Fixture::new(kind).await;
+        let mut session = f.session();
+        session.set_mode(Mode::Build).unwrap();
+        let partial = if kind == ProviderKind::Compatible {
+            json!({"choices":[{"index":0,"delta":{"content":"Partial answer","tool_calls":[{"index":0,"id":"bad","function":{"name":"run_shell","arguments":"{\"command\":\"touch forbidden\"}"}}]}}]})
+        } else {
+            json!({"type":"response.output_text.delta","delta":"Partial answer"})
+        };
+        let failure = json!({"type":"error","error":{"type":"usage_limit_reached","message":"SECRET provider body"}});
+        f.state
+            .replies
+            .lock()
+            .unwrap()
+            .push_back(format!("data: {partial}\n\ndata: {failure}\n\n"));
+        let (session, error) = f
+            .run(session, Action::Message("Inspect skills".into()), vec![])
+            .await;
+        let error = error.unwrap();
+        assert!(error.contains("usage_limit_reached"), "{error}");
+        assert!(error.contains("check account usage"), "{error}");
+        assert!(!error.contains("SECRET"));
+        assert!(!f.root.join("forbidden").exists());
+        assert!(session.pending_tools.is_empty());
+        assert!(session.history().unwrap().iter().any(|(_, m)| matches!(m, Message::Assistant { turn } if turn.text.contains("Partial answer") && turn.calls.is_empty())));
+        assert_eq!(f.state.requests.lock().unwrap().len(), 1);
+        let events = fs::read_to_string(session.dir.join("events.jsonl")).unwrap();
+        assert!(events.contains("usage_limit_reached"));
+        assert!(!events.contains("SECRET"));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn new_nested_instructions_are_seen_before_mutation() {
     let f = Fixture::new(ProviderKind::Compatible).await;
     fs::create_dir(f.root.join("src")).unwrap();
@@ -704,7 +1008,7 @@ async fn effort_reaches_every_tool_turn_compaction_and_can_return_to_default() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
+async fn home_skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
     for kind in [ProviderKind::Openai, ProviderKind::Compatible] {
         let mut f = Fixture::new(kind).await;
         f.config.bypass = true;
@@ -717,7 +1021,7 @@ async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
                 ..Default::default()
             },
         );
-        let dir = f.root.join(".agents/skills/demo");
+        let dir = f.paths.home.join(".agents/skills/demo");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("SKILL.md"), "---\nname: demo\ndescription: A test skill\n---\nUse only the existing permission controls.\n").unwrap();
         f.reply("", vec![("s1", "list_skills", json!({}))]);
@@ -746,6 +1050,7 @@ async fn skills_are_passive_and_mcp_is_rejected_in_plan_for_both_providers() {
         assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "read_skill" && content.contains("existing permission controls"))));
         assert!(history.iter().any(|(_, m)| matches!(m, Message::Tool { name, content, .. } if name == "mcp_list_tools" && content.contains("not allowed in Plan"))));
         let requests = f.state.requests.lock().unwrap();
+        assert!(requests[0].to_string().contains("A test skill"));
         let definitions = requests[0]["tools"].to_string();
         assert!(definitions.contains("list_skills"));
         assert!(!definitions.contains("mcp_list_tools"));

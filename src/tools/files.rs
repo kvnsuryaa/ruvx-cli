@@ -86,6 +86,15 @@ fn protected(path: &Path, config: &ToolConfig) -> bool {
 }
 
 fn walk(root: &Path, start: &Path, config: &ToolConfig) -> Result<Vec<PathBuf>> {
+    walk_cancellable(root, start, config, None)
+}
+
+fn walk_cancellable(
+    root: &Path,
+    start: &Path,
+    config: &ToolConfig,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+) -> Result<Vec<PathBuf>> {
     let canonical_root = root.canonicalize()?;
     ensure!(
         !protected(start, config),
@@ -105,6 +114,10 @@ fn walk(root: &Path, start: &Path, config: &ToolConfig) -> Result<Vec<PathBuf>> 
         })
         .build()
     {
+        ensure!(
+            cancel.is_none_or(|c| !c.is_cancelled()),
+            "File search canceled"
+        );
         let entry = entry?;
         if entry.path() == start && start == root {
             continue;
@@ -120,6 +133,50 @@ fn walk(root: &Path, start: &Path, config: &ToolConfig) -> Result<Vec<PathBuf>> 
     }
     paths.sort();
     Ok(paths)
+}
+
+/// Paths only: autocomplete never reads file contents. The caller runs this off the UI thread.
+/// Return at most 100 suggestions, preferring path and basename prefixes over substrings.
+pub fn file_suggestions(
+    root: &Path,
+    config: &ToolConfig,
+    query: &str,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Vec<String>> {
+    let query = query.to_lowercase();
+    let mut matches = Vec::new();
+    for path in walk_cancellable(root, root, config, Some(cancel))? {
+        ensure!(!cancel.is_cancelled(), "File search canceled");
+        if !path.is_file() {
+            continue;
+        }
+        let Some(relative) = path.strip_prefix(root)?.to_str() else {
+            continue;
+        };
+        // The reference syntax cannot represent quotes or multiline/control-character paths.
+        if relative.chars().any(|c| c == '"' || c.is_control()) {
+            continue;
+        }
+        let lower = relative.to_lowercase();
+        if !lower.contains(&query) {
+            continue;
+        }
+        let basename = lower.rsplit('/').next().unwrap_or(&lower);
+        let rank = if lower.starts_with(&query) {
+            0
+        } else if basename.starts_with(&query) {
+            1
+        } else {
+            2
+        };
+        matches.push((rank, relative.to_owned()));
+    }
+    matches.sort();
+    Ok(matches
+        .into_iter()
+        .take(100)
+        .map(|(_, path)| path)
+        .collect())
 }
 
 fn read_text(path: &Path, limit: usize) -> Result<String> {
@@ -580,6 +637,41 @@ pub fn clip(text: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::{config::Paths, model::Mode};
+    #[test]
+    fn suggestions_are_ranked_bounded_and_respect_workspace_filters() {
+        use tokio_util::sync::CancellationToken;
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        for directory in ["src", "nested", "private", ".git", "target", "node_modules"] {
+            fs::create_dir(root.path().join(directory)).unwrap();
+        }
+        for name in ["src/main.txt", "nested/src.txt", "nested/has-src.txt", "ignored.txt", "private/secret.txt", ".git/config.txt", "target/build.txt", "node_modules/pkg.txt", "bad\"name.txt", "bad\nname.txt"] {
+            fs::write(root.path().join(name), "data").unwrap();
+        }
+        fs::write(root.path().join(".gitignore"), "ignored.txt\n").unwrap();
+        fs::write(outside.path().join("outside.txt"), "outside").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("outside.txt"), root.path().join("outside.txt")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("private/secret.txt"), root.path().join("alias.txt")).unwrap();
+        let config = ToolConfig {
+            protected_paths: vec![root.path().join("private")],
+            ..Default::default()
+        };
+        let cancel = CancellationToken::new();
+        assert_eq!(file_suggestions(root.path(), &config, "SRC", &cancel).unwrap(),
+            vec!["src/main.txt", "nested/src.txt", "nested/has-src.txt"]);
+        let suggestions = file_suggestions(root.path(), &config, ".txt", &cancel).unwrap();
+        assert_eq!(suggestions.len(), 3, "{suggestions:?}");
+        assert!(file_suggestions(root.path(), &config, "not-found", &cancel).unwrap().is_empty());
+        for index in 0..110 {
+            fs::write(root.path().join(format!("file-{index:03}.txt")), "").unwrap();
+        }
+        let suggestions = file_suggestions(root.path(), &config, "file-", &cancel).unwrap();
+        assert_eq!(suggestions.len(), 100);
+        assert_eq!(suggestions[0], "file-000.txt");
+        cancel.cancel();
+        assert!(file_suggestions(root.path(), &config, "", &cancel).is_err());
+    }
+
     #[test]
     fn paths_and_ignore_rules() {
         let root = tempfile::tempdir().unwrap();

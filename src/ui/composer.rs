@@ -13,6 +13,14 @@ pub(super) struct Preflight {
 }
 impl App {
     pub(super) fn paste(&mut self, text: &str) -> Result<()> {
+        if let Some(browser) = &mut self.mcp_browser {
+            browser.paste(text);
+            return Ok(());
+        }
+        if let Some(browser) = &mut self.skill_browser {
+            browser.paste(text);
+            return Ok(());
+        }
         let text = sanitize(&text.replace("\r\n", "\n").replace('\r', "\n"));
         if let Some(editor) = &mut self.paste_editor {
             editor.insert(&text)?;

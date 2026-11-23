@@ -1,7 +1,9 @@
 mod files;
 mod shell;
 
-pub use files::{ReadArgs, diff, instructions_for, read_file, resolve_path, snapshot};
+pub use files::{
+    ReadArgs, diff, file_suggestions, instructions_for, read_file, resolve_path, snapshot,
+};
 pub use shell::ShellArgs;
 
 use crate::{

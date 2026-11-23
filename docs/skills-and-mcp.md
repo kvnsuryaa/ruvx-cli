@@ -7,16 +7,17 @@ ruvx mendukung skill lokal yang dibaca secara pasif dan MCP **stdio** untuk tool
 Lokasi discovery:
 
 - Proyek: `<workspace>/.agents/skills/<nama>/SKILL.md`
-- Global: `$XDG_CONFIG_HOME/ruvx/skills/<nama>/SKILL.md`, default `~/.config/ruvx/skills/<nama>/SKILL.md`
+- Global bersama: `~/.agents/skills/<nama>/SKILL.md` (mengikuti `HOME`, terpisah dari XDG).
+- Global ruvx: `$XDG_CONFIG_HOME/ruvx/skills/<nama>/SKILL.md`, default `~/.config/ruvx/skills/<nama>/SKILL.md`
 - Tambahan: folder lokal yang didaftarkan dengan `/skills add`, berupa satu folder berisi `SKILL.md` atau koleksi folder skill satu tingkat.
 
-Prioritas nama sama: proyek, lokasi tambahan yang terakhir didaftarkan, lalu global bawaan. Discovery koleksi hanya satu tingkat direktori, bukan recursive. Folder dan `SKILL.md` tidak boleh menunjuk keluar discovery root/skill melalui symlink. Direktori skills proyek tidak boleh menunjuk keluar workspace. Lokasi tambahan yang hilang/tidak dapat dibaca dilaporkan sebagai warning; lokasi lain tetap dapat digunakan.
+Kedua lokasi global dibaca otomatis tanpa `/skills add`. Prioritas nama sama: proyek, lokasi tambahan yang terakhir didaftarkan, global ruvx, lalu global bersama (`~/.agents/skills`). Discovery koleksi hanya satu tingkat direktori, bukan recursive. Folder dan `SKILL.md` tidak boleh menunjuk keluar discovery root/skill melalui symlink. Direktori skills proyek tidak boleh menunjuk keluar workspace. Lokasi tambahan yang hilang/tidak dapat dibaca dilaporkan sebagai warning; lokasi lain tetap dapat digunakan.
 
 ### Mengelola lokasi skill
 
 Jalankan command berikut saat idle; tidak memerlukan model yang sudah terhubung:
 
-- `/skills`: lihat status, lokasi, skill yang ditemukan, dan warning.
+- `/skills`: buka browser katalog dengan status discovery, jumlah skill, dan tab **Skills**, **Locations**, serta **Warnings**. Ketik untuk mencari nama/deskripsi (case-insensitive); `↑`/`↓` memilih skill, `PgUp`/`PgDn` berpindah satu halaman, dan `Enter` membuka detail metadata yang dapat di-scroll. Preview deskripsi/path berada di samping pada terminal lebar atau di bawah pada terminal kecil; pada layar sangat kecil gunakan `Enter` untuk detail lengkap. `Tab`/`Shift+Tab` berpindah tab, `Ctrl+U` menghapus pencarian sebelum cursor, dan `Esc` kembali dari detail atau menutup browser. Mouse dapat memilih baris/tab dan scroll. Browser tidak mengirim request model, mengubah draft pesan, atau menjalankan script. Tutup browser untuk menjalankan command pengelolaan berikut.
 - `/skills add`: masukkan path folder skill atau koleksi pada dialog. Path relatif dihitung dari workspace; path dengan spasi ditulis langsung tanpa tanda kutip shell. Path disimpan sebagai absolut kanonis. Path yang sama atau alias symlink-nya tidak boleh didaftarkan dua kali.
 - `/skills remove`: pilih nomor lokasi tambahan untuk melepas pendaftaran. File sumber dan lokasi bawaan tetap utuh.
 - `/skills enable` atau `/skills disable`: aktifkan/nonaktifkan discovery secara global.
@@ -71,11 +72,13 @@ Server hanya berasal dari config global pengguna, **bukan config executable proy
 
 | Command | Perilaku |
 | --- | --- |
-| `/mcp` | Daftar server dan status tanpa memulai proses. |
+| `/mcp` | Browser interaktif server dengan pencarian, status konfigurasi, preview/detail, dan tab Configuration; tanpa memulai proses. |
 | `/mcp add` | Dialog ID baru, executable absolut, argv JSON array, nama environment JSON array, timeout, batas pesan, dan status aktif. |
 | `/mcp edit <id>` | Ubah parameter server; input kosong mempertahankan nilai sekarang, `[]` mengosongkan argv/environment. |
 | `/mcp enable <id>`, `/mcp disable <id>` | Ubah status aktif untuk run berikutnya. |
 | `/mcp remove <id>` | Hapus entri konfigurasi server; executable tidak dihapus. |
+
+Browser `/mcp` mengikuti pola `/skills`: ketik untuk mencari ID atau executable (case-insensitive), `↑`/`↓` memilih server, `PgUp`/`PgDn` berpindah satu halaman, dan `Enter` membuka detail yang dapat di-scroll. Preview berada di samping pada terminal lebar, di bawah pada terminal yang cukup tinggi, atau tersedia lewat `Enter` pada layar kecil. Detail menampilkan executable, arguments, **nama** environment variable (bukan nilainya), timeout, dan batas pesan. `Tab`/`Shift+Tab` berpindah antara **Servers** dan **Configuration**, yang memuat lokasi config dan command pengelolaan. `Ctrl+U` menghapus pencarian sebelum cursor; `Esc` kembali dari detail atau menutup browser. Mouse dapat memilih baris/tab dan scroll. Status enabled/disabled adalah status konfigurasi, **bukan status koneksi**. Browser tidak mengubah draft pesan, melakukan discovery tools, mengirim request model, atau menjalankan server. Tutup browser sebelum menjalankan command pengelolaan.
 
 Server baru melalui dialog memakai default aktif, timeout 60 detik, batas pesan 1 MiB, serta environment `PATH` dan `HOME`. ID duplikat ditolak. Sebelum menyimpan, periksa ringkasan lalu pilih **Save configuration** atau ketik `save`. Escape atau `cancel` pada ringkasan membuang draft. Kesalahan input mempertahankan langkah dialog agar dapat diperbaiki. Kegagalan penyimpanan mempertahankan config aktif sebelumnya.
 

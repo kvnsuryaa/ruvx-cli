@@ -15,6 +15,7 @@ pub(super) enum Button {
     Command(String),
     Choice(String),
     CommandChoice(String),
+    FileChoice(String),
     Detail(usize),
     Bottom,
     Fold(usize),
@@ -29,6 +30,7 @@ pub(super) struct FrameMap {
     pub rows: Vec<Row>,
     pub composer: Rect,
     pub command_menu: Rect,
+    pub file_menu: Rect,
     pub paste_body: Rect,
     pub editor_first: usize,
     pub buttons: Vec<(Rect, Button)>,
@@ -57,6 +59,14 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     app.frame = FrameMap::default();
     if area.width < 4 || area.height < 5 {
         label(frame, area, "Enlarge terminal", Style::default());
+        return;
+    }
+    if let Some(browser) = &mut app.mcp_browser {
+        browser.render(frame);
+        return;
+    }
+    if let Some(browser) = &mut app.skill_browser {
+        browser.render(frame);
         return;
     }
     if app.paste_editor.is_some() {
@@ -195,6 +205,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let input_height =
         (editor_lines.len().clamp(1, 6) as u16).min(area.height.saturating_sub(5).max(1));
     let menu = app.command_matches();
+    let files = app.file_matches();
     let mut choices = app.dialog.choices();
     if let Dialog::ModelPick { choices: models } = &app.dialog {
         for ((label, _), selection) in choices.iter_mut().zip(models) {
@@ -215,9 +226,13 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
     } else {
         6
     };
-    let choice_count = menu
-        .as_ref()
-        .map_or(choices.len(), |items| items.len().max(1));
+    let choice_count = files.as_ref().map_or_else(
+        || {
+            menu.as_ref()
+                .map_or(choices.len(), |items| items.len().max(1))
+        },
+        |items| items.len().max(1),
+    );
     let choice_height =
         (choice_count.min(max_choices) as u16).min(area.height.saturating_sub(input_height + 6));
     let composer_y = area.height.saturating_sub(input_height + 1);
@@ -382,6 +397,7 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
         );
     }
     if menu.is_none()
+        && files.is_none()
         && app.context_blocked
         && app.active.is_none()
         && matches!(app.dialog, Dialog::None)
@@ -488,6 +504,69 @@ pub(super) fn render(frame: &mut Frame, app: &mut App) {
                 count,
                 Style::default().fg(accent),
             );
+        }
+    }
+    if let Some(items) = &files {
+        let panel = Rect::new(2, dialog_y + 1, area.width - 4, choice_height);
+        app.frame.file_menu = Rect::new(1, dialog_y, area.width - 2, choice_height + 1);
+        let surface = Style::default()
+            .bg(Color::Indexed(236))
+            .fg(Color::Indexed(252));
+        frame.buffer_mut().set_style(panel, surface);
+        label(
+            frame,
+            Rect::new(1, dialog_y, area.width - 2, 1),
+            format!(
+                "@ Files · Up/Down · Tab/Enter insert · Esc close · {}/{} (max 100)",
+                if items.is_empty() {
+                    0
+                } else {
+                    app.file_menu.selected + 1
+                },
+                items.len()
+            ),
+            Style::default().fg(accent),
+        );
+        if items.is_empty() {
+            let message = if app.file_menu.loading {
+                "Searching workspace files…".to_owned()
+            } else if let Some(error) = &app.file_menu.error {
+                format!("File search failed: {error}")
+            } else {
+                "No matching files · Esc to close; explicit @path still works".to_owned()
+            };
+            label(
+                frame,
+                Rect::new(panel.x, panel.y, panel.width, choice_height.min(1)),
+                message,
+                surface,
+            );
+        }
+        let first = app
+            .file_menu
+            .selected
+            .saturating_sub(choice_height.saturating_sub(1) as usize);
+        for (index, path) in items
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(choice_height as usize)
+        {
+            let r = Rect::new(panel.x, panel.y + (index - first) as u16, panel.width, 1);
+            let selected = index == app.file_menu.selected;
+            label(
+                frame,
+                r,
+                format!("{} {path}", if selected { ">" } else { " " }),
+                if selected {
+                    surface.add_modifier(Modifier::REVERSED)
+                } else {
+                    surface
+                },
+            );
+            app.frame
+                .buttons
+                .push((r, Button::FileChoice(path.clone())));
         }
     }
     let first = cursor_row.saturating_sub(input_height as usize - 1);
@@ -721,6 +800,7 @@ impl App {
                 self.focus = 0;
             }
             Button::CommandChoice(name) => self.choose_command(&name, false, height)?,
+            Button::FileChoice(path) => self.choose_file(&path),
             Button::Choice(value) => {
                 // Input can contain several clicks before the next frame. A choice
                 // from the previous dialog must not overwrite a restored draft.
@@ -815,12 +895,22 @@ impl App {
         true
     }
     pub(super) fn mouse(&mut self, event: MouseEvent, height: u16) -> Result<()> {
+        if let Some(browser) = &mut self.mcp_browser {
+            browser.mouse(event);
+            return Ok(());
+        }
+        if let Some(browser) = &mut self.skill_browser {
+            browser.mouse(event);
+            return Ok(());
+        }
         let cell = Cell::new(event.column, event.row);
         self.pointer = (event.column, event.row);
         match event.kind {
             MouseEventKind::ScrollUp => {
                 if self.frame.command_menu.contains(cell) && self.command_matches().is_some() {
                     self.move_command(false);
+                } else if self.frame.file_menu.contains(cell) && self.file_matches().is_some() {
+                    self.move_file(false);
                 } else if let Some(editor) = &mut self.paste_editor {
                     editor.scroll(-3);
                 } else {
@@ -830,6 +920,8 @@ impl App {
             MouseEventKind::ScrollDown => {
                 if self.frame.command_menu.contains(cell) && self.command_matches().is_some() {
                     self.move_command(true);
+                } else if self.frame.file_menu.contains(cell) && self.file_matches().is_some() {
+                    self.move_file(true);
                 } else if let Some(editor) = &mut self.paste_editor {
                     editor.scroll(3);
                 } else {

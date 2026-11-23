@@ -93,32 +93,15 @@ impl App {
             [] => {
                 let root = &self.session.as_ref().context("Session unavailable")?.root;
                 let (skills, warnings) = crate::skills::discover(&self.paths, &self.config, root)?;
-                let mut output = format!(
-                    "Agent Skills · enabled: {}\nUser: {}\nProject: {}\n",
+                self.skill_browser = Some(skill_browser::Browser::new(
+                    skills,
+                    warnings,
+                    crate::skills::locations(&self.paths, &self.config, root),
+                    self.paths.home.clone(),
                     self.config.skills.enabled,
-                    self.paths.config.join("skills").display(),
-                    root.join(".agents/skills").display()
-                );
-                for path in &self.config.skills.paths {
-                    output.push_str(&format!("Additional: {}\n", path.display()));
-                }
-                output.push_str("\n/skills add · /skills remove · /skills enable · /skills disable\nNo scripts are executed.\n\n");
-                if skills.is_empty() {
-                    output.push_str("No skills discovered.\n");
-                }
-                for skill in skills {
-                    output.push_str(&format!(
-                        "{} [{}]\n{}\n{}\n\n",
-                        skill.name,
-                        skill.source,
-                        skill.description,
-                        skill.directory.display()
-                    ));
-                }
-                for warning in warnings {
-                    output.push_str(&format!("Warning: {warning}\n"));
-                }
-                self.page(output, Dialog::None, height);
+                ));
+                self.gesture = None;
+                self.focused_button = None;
             }
             ["add"] => self.open_extension(Setup::SkillAdd, height),
             ["remove"] => {
@@ -141,26 +124,12 @@ impl App {
     pub(super) fn mcp_command(&mut self, args: &[&str], height: u16) -> Result<()> {
         match args {
             [] => {
-                let mut output = format!(
-                    "MCP servers · stdio only\nConfig: {}\n/mcp add · /mcp edit <id> · /mcp remove <id>\n/mcp enable <id> · /mcp disable <id>\nBuild operations follow the active Ask/BYPASS approval policy. Servers stop when the agent run ends.\nNo servers are started by configuration commands.\n\n",
-                    self.paths.config_file().display()
-                );
-                for (id, server) in &self.config.mcp_servers {
-                    output.push_str(&format!(
-                        "{id} · {} · {} · timeout {}s\n",
-                        if server.enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        },
-                        server.command.display(),
-                        server.timeout_seconds
-                    ));
-                }
-                if self.config.mcp_servers.is_empty() {
-                    output.push_str("No MCP servers configured.\n");
-                }
-                self.page(output, Dialog::None, height);
+                self.mcp_browser = Some(mcp_browser::Browser::new(
+                    &self.config.mcp_servers,
+                    self.paths.config_file(),
+                ));
+                self.gesture = None;
+                self.focused_button = None;
             }
             ["add"] => self.open_extension(
                 Setup::Mcp(McpDraft {

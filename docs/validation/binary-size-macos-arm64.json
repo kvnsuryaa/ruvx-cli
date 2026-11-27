@@ -1,0 +1,1045 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-27",
+  "platform": "macOS-26.0-arm64-arm-64bit",
+  "hardware_model": "MacBookPro17,1",
+  "memory_bytes": 8589934592,
+  "rustc": "rustc 1.89.0 (29483883e 2025-08-04)\nbinary: rustc\ncommit-hash: 29483883eed69d5fb4db01964cdf2af4d86e9cb2\ncommit-date: 2025-08-04\nhost: aarch64-apple-darwin\nrelease: 1.89.0\nLLVM version: 20.1.7\n",
+  "cargo_bloat": "0.12.1",
+  "python": "3.11.14",
+  "source": {
+    "commit": "eb0b1b9582851846ac903d7aff6938b6bf85748f",
+    "includes_preexisting_local_changes": true,
+    "rust_source_sha256": "756f5e4e14b19d77cee5027ef1809507173cee002c86ad3081b259e3e10f3b64",
+    "rust_source_hash_method": "SHA-256 of newline-joined, sorted repo-relative path + space + file SHA-256 pairs for src/**/*.rs; no trailing newline",
+    "cargo_lock_sha256": "39cadaf2a0ad5ae0371675cdaefb596c2d3b941a04f8fa0e9394b95f5955cbbe"
+  },
+  "build_conditions": {
+    "codegen_units": 1,
+    "strip": true,
+    "panic": "unwind (unchanged)",
+    "separate_empty_target_directories": true,
+    "dependencies_already_downloaded": true,
+    "sequential_builds": true,
+    "build_timing": "monotonic elapsed seconds; one build per variant; OS cache, temperature and unrelated host load uncontrolled"
+  },
+  "baseline": "s-thin",
+  "selected": "z-fat",
+  "saved_bytes": 2445072,
+  "saved_percent": 36.507387,
+  "variants": [
+    {
+      "variant": "s-thin",
+      "opt_level": "s",
+      "lto": "thin",
+      "build_seconds": 110.961,
+      "build_exit_code": 0,
+      "binary_bytes": 6697472,
+      "binary_sha256": "176ab0a72f72219b8ad1fcbcf781b3e12ae01d8cba1dd398fce3cf5785d97159",
+      "validation_exit_code": 0,
+      "performance": {
+        "samples": 20,
+        "startup_ms": [
+          55.819834000431,
+          59.84783300664276,
+          52.28779197204858,
+          64.98354201903567,
+          60.62687502708286,
+          54.78054203558713,
+          53.80391696235165,
+          55.999290954787284,
+          55.19091698806733,
+          56.18741601938382,
+          66.14150002133101,
+          60.06283400347456,
+          64.05254098353907,
+          77.82608299748972,
+          61.42658297903836,
+          69.71016700845212,
+          62.32208397705108,
+          194.15749999461696,
+          120.15758303459734,
+          54.03370800195262
+        ],
+        "startup_p95_ms": 120.158,
+        "startup_median_ms": 60.345,
+        "idle_observation_seconds": 10,
+        "idle_rss_max_bytes": 9076736,
+        "binary_bytes": 6697472,
+        "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+      },
+      "validation_summary": {
+        "functional_scenarios_passed": 22,
+        "git_workflow": {
+          "local_commit_and_push": "passed",
+          "repeated_approval_click": "ignored",
+          "enter_during_push": "draft preserved; push continued",
+          "external_remotes_used": false
+        },
+        "git_auth": {
+          "http_401": "captured failure with authentication hint",
+          "controlling_terminal": "detached",
+          "external_services_used": false
+        },
+        "bypass": {
+          "cli_and_tui": "passed",
+          "shell_and_mcp_without_approval": "passed",
+          "off_restores_approval": "passed",
+          "restart_defaults_to_ask": "passed"
+        },
+        "load_profile": {
+          "workspace_text_files": 256,
+          "workspace_text_bytes_per_file": 4096,
+          "streamed_text_bytes": 32785,
+          "additional_historical_conversations": 256,
+          "observed_parent_rss_max_bytes_by_stage": {
+            "file_tools_and_streaming": 11960320,
+            "snapshot_and_shell": 11616256,
+            "larger_resume": 10272768
+          },
+          "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+        },
+        "paste_profile": {
+          "cases": [
+            {
+              "paste_bytes": 1048576,
+              "transfer_and_preview_ms": 287.722,
+              "keyboard_response_ms": 53.52,
+              "observed_parent_rss_max_bytes": 14778368
+            },
+            {
+              "paste_bytes": 10485760,
+              "transfer_and_preview_ms": 1590.759,
+              "keyboard_response_ms": 51.078,
+              "preflight_context_rejected_draft_preserved": true,
+              "observed_parent_rss_max_bytes": 71106560
+            }
+          ],
+          "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+        }
+      }
+    },
+    {
+      "variant": "z-thin",
+      "opt_level": "z",
+      "lto": "thin",
+      "build_seconds": 87.74,
+      "build_exit_code": 0,
+      "binary_bytes": 5657424,
+      "binary_sha256": "64ba7a98e43d444ed94d0320b283c9d4483ab1e1f41cd0a445b5530516887f36",
+      "validation_exit_code": 0,
+      "performance": {
+        "samples": 20,
+        "startup_ms": [
+          60.3943329770118,
+          59.411584050394595,
+          58.21833299705759,
+          54.303000040818006,
+          58.07445902610198,
+          55.506167002022266,
+          53.179791022557765,
+          58.84816701291129,
+          63.52712499210611,
+          55.9916669735685,
+          56.63529201410711,
+          60.00054202741012,
+          56.48312496487051,
+          54.67966600554064,
+          57.309458032250404,
+          58.05833300109953,
+          54.86920801922679,
+          65.29270799364895,
+          54.13054203381762,
+          56.42308300593868
+        ],
+        "startup_p95_ms": 63.527,
+        "startup_median_ms": 56.972,
+        "idle_observation_seconds": 10,
+        "idle_rss_max_bytes": 9158656,
+        "binary_bytes": 5657424,
+        "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+      },
+      "validation_summary": {
+        "functional_scenarios_passed": 22,
+        "git_workflow": {
+          "local_commit_and_push": "passed",
+          "repeated_approval_click": "ignored",
+          "enter_during_push": "draft preserved; push continued",
+          "external_remotes_used": false
+        },
+        "git_auth": {
+          "http_401": "captured failure with authentication hint",
+          "controlling_terminal": "detached",
+          "external_services_used": false
+        },
+        "bypass": {
+          "cli_and_tui": "passed",
+          "shell_and_mcp_without_approval": "passed",
+          "off_restores_approval": "passed",
+          "restart_defaults_to_ask": "passed"
+        },
+        "load_profile": {
+          "workspace_text_files": 256,
+          "workspace_text_bytes_per_file": 4096,
+          "streamed_text_bytes": 32785,
+          "additional_historical_conversations": 256,
+          "observed_parent_rss_max_bytes_by_stage": {
+            "file_tools_and_streaming": 11436032,
+            "snapshot_and_shell": 12156928,
+            "larger_resume": 10272768
+          },
+          "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+        },
+        "paste_profile": {
+          "cases": [
+            {
+              "paste_bytes": 1048576,
+              "transfer_and_preview_ms": 233.043,
+              "keyboard_response_ms": 52.352,
+              "observed_parent_rss_max_bytes": 15335424
+            },
+            {
+              "paste_bytes": 10485760,
+              "transfer_and_preview_ms": 1276.116,
+              "keyboard_response_ms": 54.582,
+              "preflight_context_rejected_draft_preserved": true,
+              "observed_parent_rss_max_bytes": 73957376
+            }
+          ],
+          "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+        }
+      }
+    },
+    {
+      "variant": "s-fat",
+      "opt_level": "s",
+      "lto": "fat",
+      "build_seconds": 147.379,
+      "build_exit_code": 0,
+      "binary_bytes": 5263760,
+      "binary_sha256": "40703195d730a99495cd0fa125213626b8bc7f7ca7f0ed335a32a58b51a824a0",
+      "validation_exit_code": 0,
+      "performance": {
+        "samples": 20,
+        "startup_ms": [
+          55.161917000077665,
+          54.13141701137647,
+          53.59637504443526,
+          54.4745409861207,
+          55.03095802851021,
+          54.8068750067614,
+          56.816875003278255,
+          53.65841696038842,
+          52.963374997489154,
+          56.4747080206871,
+          174.98387501109391,
+          155.84054199280217,
+          53.45674999989569,
+          168.3553330367431,
+          58.12512501142919,
+          55.16312504187226,
+          58.227417001035064,
+          119.44841698277742,
+          243.33658296382055,
+          63.62745899241418
+        ],
+        "startup_p95_ms": 174.984,
+        "startup_median_ms": 55.819,
+        "idle_observation_seconds": 10,
+        "idle_rss_max_bytes": 8978432,
+        "binary_bytes": 5263760,
+        "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+      },
+      "validation_summary": {
+        "functional_scenarios_passed": 22,
+        "git_workflow": {
+          "local_commit_and_push": "passed",
+          "repeated_approval_click": "ignored",
+          "enter_during_push": "draft preserved; push continued",
+          "external_remotes_used": false
+        },
+        "git_auth": {
+          "http_401": "captured failure with authentication hint",
+          "controlling_terminal": "detached",
+          "external_services_used": false
+        },
+        "bypass": {
+          "cli_and_tui": "passed",
+          "shell_and_mcp_without_approval": "passed",
+          "off_restores_approval": "passed",
+          "restart_defaults_to_ask": "passed"
+        },
+        "load_profile": {
+          "workspace_text_files": 256,
+          "workspace_text_bytes_per_file": 4096,
+          "streamed_text_bytes": 32785,
+          "additional_historical_conversations": 256,
+          "observed_parent_rss_max_bytes_by_stage": {
+            "file_tools_and_streaming": 11993088,
+            "snapshot_and_shell": 12124160,
+            "larger_resume": 9977856
+          },
+          "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+        },
+        "paste_profile": {
+          "cases": [
+            {
+              "paste_bytes": 1048576,
+              "transfer_and_preview_ms": 343.508,
+              "keyboard_response_ms": 53.574,
+              "observed_parent_rss_max_bytes": 13828096
+            },
+            {
+              "paste_bytes": 10485760,
+              "transfer_and_preview_ms": 2004.534,
+              "keyboard_response_ms": 51.108,
+              "preflight_context_rejected_draft_preserved": true,
+              "observed_parent_rss_max_bytes": 67944448
+            }
+          ],
+          "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+        }
+      }
+    },
+    {
+      "variant": "z-fat",
+      "opt_level": "z",
+      "lto": "fat",
+      "build_seconds": 195.384,
+      "build_exit_code": 0,
+      "binary_bytes": 4252400,
+      "binary_sha256": "847bf370acbd383df5208badf86c5b71b66b0f53e3cade5d5f89ccae0c45c735",
+      "validation_exit_code": 0,
+      "validation_attempts": [
+        {
+          "result": "failed",
+          "detail": "KeyError: fixture-tools; immediate config read after MCP Save"
+        },
+        {
+          "result": "passed",
+          "report": "z-fat/validation-retry.json"
+        },
+        {
+          "result": "passed",
+          "report": "z-fat/validation.json",
+          "harness_change": "Wait for persisted MCP server before reading its settings"
+        }
+      ],
+      "performance": {
+        "samples": 20,
+        "startup_ms": [
+          59.87895798170939,
+          53.14758402528241,
+          55.40499999187887,
+          58.43645799905062,
+          54.973334015812725,
+          55.08454196387902,
+          54.65587502112612,
+          61.528249992989004,
+          108.17737499019131,
+          53.941333026159555,
+          53.717374976258725,
+          56.454457982908934,
+          52.34770802780986,
+          54.85066695837304,
+          59.857374988496304,
+          58.70066600618884,
+          63.73749999329448,
+          56.231459020636976,
+          55.485500022768974,
+          73.59987497329712
+        ],
+        "startup_p95_ms": 73.6,
+        "startup_median_ms": 55.858,
+        "idle_observation_seconds": 10,
+        "idle_rss_max_bytes": 9011200,
+        "binary_bytes": 4252400,
+        "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+      },
+      "validation_summary": {
+        "functional_scenarios_passed": 22,
+        "git_workflow": {
+          "local_commit_and_push": "passed",
+          "repeated_approval_click": "ignored",
+          "enter_during_push": "draft preserved; push continued",
+          "external_remotes_used": false
+        },
+        "git_auth": {
+          "http_401": "captured failure with authentication hint",
+          "controlling_terminal": "detached",
+          "external_services_used": false
+        },
+        "bypass": {
+          "cli_and_tui": "passed",
+          "shell_and_mcp_without_approval": "passed",
+          "off_restores_approval": "passed",
+          "restart_defaults_to_ask": "passed"
+        },
+        "load_profile": {
+          "workspace_text_files": 256,
+          "workspace_text_bytes_per_file": 4096,
+          "streamed_text_bytes": 32785,
+          "additional_historical_conversations": 256,
+          "observed_parent_rss_max_bytes_by_stage": {
+            "file_tools_and_streaming": 10797056,
+            "snapshot_and_shell": 11108352,
+            "larger_resume": 9895936
+          },
+          "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+        },
+        "paste_profile": {
+          "cases": [
+            {
+              "paste_bytes": 1048576,
+              "transfer_and_preview_ms": 203.704,
+              "keyboard_response_ms": 51.981,
+              "observed_parent_rss_max_bytes": 14712832
+            },
+            {
+              "paste_bytes": 10485760,
+              "transfer_and_preview_ms": 1898.983,
+              "keyboard_response_ms": 50.541,
+              "preflight_context_rejected_draft_preserved": true,
+              "observed_parent_rss_max_bytes": 66060288
+            }
+          ],
+          "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+        }
+      }
+    }
+  ],
+  "terminal_validation": {
+    "command": "python3.11 scripts/verify_terminal.py --binary <variant>/release/ruvx --benchmark --output <variant>/validation.json",
+    "all_variants_passed": true,
+    "harness_change": "Wait for persisted fixture-tools MCP entry after Save instead of relying only on the fixed 120 ms PTY pump; z-fat passed both an unchanged-harness retry and validation with this wait.",
+    "harness_sha256_after_fix": "4aa944eee11c7ffcb8688032e32d386393b43ea78881415637f360e7a8c27c73",
+    "startup_p95_limit_ms": 500,
+    "idle_rss_limit_bytes": 100000000,
+    "binary_limit_bytes": 40000000
+  },
+  "analysis": {
+    "stripped": false,
+    "interpretation": "Approximate code attribution by symbols; excludes much of the constant data and file metadata; overlap/inlining can affect attribution. Analysis file size is not installed size.",
+    "crates": {
+      "file-size": 7579416,
+      "text-section-size": 2747552,
+      "crates": [
+        {
+          "name": "ruvx",
+          "size": 680676
+        },
+        {
+          "name": "std",
+          "size": 486200
+        },
+        {
+          "name": "rustls",
+          "size": 205220
+        },
+        {
+          "name": "[Unknown]",
+          "size": 181424
+        },
+        {
+          "name": "regex_automata",
+          "size": 141816
+        },
+        {
+          "name": "reqwest",
+          "size": 116644
+        },
+        {
+          "name": "ring",
+          "size": 94516
+        },
+        {
+          "name": "clap_builder",
+          "size": 92532
+        },
+        {
+          "name": "regex_syntax",
+          "size": 79652
+        },
+        {
+          "name": "aho_corasick",
+          "size": 68156
+        },
+        {
+          "name": "tokio",
+          "size": 60692
+        },
+        {
+          "name": "toml_edit",
+          "size": 54648
+        },
+        {
+          "name": "jsonwebtoken",
+          "size": 34248
+        },
+        {
+          "name": "hyper_util",
+          "size": 32176
+        },
+        {
+          "name": "http",
+          "size": 29972
+        },
+        {
+          "name": "ignore",
+          "size": 29304
+        },
+        {
+          "name": "webpki",
+          "size": 29088
+        },
+        {
+          "name": "url",
+          "size": 26388
+        },
+        {
+          "name": "globset",
+          "size": 24772
+        },
+        {
+          "name": "serde_json",
+          "size": 24252
+        },
+        {
+          "name": "unsafe_libyaml",
+          "size": 21916
+        },
+        {
+          "name": "idna",
+          "size": 15776
+        },
+        {
+          "name": "ratatui_core",
+          "size": 14552
+        },
+        {
+          "name": "crossterm",
+          "size": 14328
+        },
+        {
+          "name": "winnow",
+          "size": 13760
+        },
+        {
+          "name": "serde_yaml",
+          "size": 13372
+        },
+        {
+          "name": "hyper",
+          "size": 13220
+        },
+        {
+          "name": "similar",
+          "size": 11880
+        },
+        {
+          "name": "chrono",
+          "size": 10532
+        },
+        {
+          "name": "walkdir",
+          "size": 9164
+        },
+        {
+          "name": "unicode_segmentation",
+          "size": 6132
+        },
+        {
+          "name": "anyhow",
+          "size": 5756
+        },
+        {
+          "name": "ratatui_widgets",
+          "size": 5736
+        },
+        {
+          "name": "bytes",
+          "size": 5540
+        },
+        {
+          "name": "icu_normalizer",
+          "size": 5392
+        },
+        {
+          "name": "memchr",
+          "size": 5356
+        },
+        {
+          "name": "hyper_rustls",
+          "size": 5348
+        },
+        {
+          "name": "hashbrown",
+          "size": 5332
+        },
+        {
+          "name": "unicode_width",
+          "size": 5088
+        },
+        {
+          "name": "serde_core",
+          "size": 4484
+        },
+        {
+          "name": "rand_chacha",
+          "size": 4184
+        },
+        {
+          "name": "base64",
+          "size": 4056
+        },
+        {
+          "name": "sha2",
+          "size": 3708
+        },
+        {
+          "name": "toml",
+          "size": 3704
+        },
+        {
+          "name": "rustls_pki_types",
+          "size": 3536
+        },
+        {
+          "name": "tokio_util",
+          "size": 3528
+        },
+        {
+          "name": "uuid",
+          "size": 3148
+        },
+        {
+          "name": "httparse",
+          "size": 3132
+        },
+        {
+          "name": "signal_hook_registry",
+          "size": 2912
+        },
+        {
+          "name": "pem",
+          "size": 2692
+        },
+        {
+          "name": "parking_lot_core",
+          "size": 2624
+        },
+        {
+          "name": "parking_lot",
+          "size": 1928
+        },
+        {
+          "name": "mio",
+          "size": 1924
+        },
+        {
+          "name": "anstream",
+          "size": 1744
+        },
+        {
+          "name": "ipnet",
+          "size": 1588
+        },
+        {
+          "name": "toml_datetime",
+          "size": 1444
+        },
+        {
+          "name": "serde",
+          "size": 1312
+        },
+        {
+          "name": "icu_collections",
+          "size": 1308
+        },
+        {
+          "name": "anstyle",
+          "size": 1288
+        },
+        {
+          "name": "smallvec",
+          "size": 1200
+        },
+        {
+          "name": "tower",
+          "size": 1188
+        },
+        {
+          "name": "tower_http",
+          "size": 1180
+        },
+        {
+          "name": "percent_encoding",
+          "size": 1060
+        },
+        {
+          "name": "getrandom",
+          "size": 1036
+        },
+        {
+          "name": "clap_lex",
+          "size": 988
+        },
+        {
+          "name": "ratatui",
+          "size": 968
+        },
+        {
+          "name": "http_body_util",
+          "size": 952
+        },
+        {
+          "name": "tempfile",
+          "size": 932
+        },
+        {
+          "name": "form_urlencoded",
+          "size": 908
+        },
+        {
+          "name": "compact_str",
+          "size": 904
+        },
+        {
+          "name": "strsim",
+          "size": 776
+        },
+        {
+          "name": "tokio_rustls",
+          "size": 728
+        },
+        {
+          "name": "digest",
+          "size": 648
+        },
+        {
+          "name": "zmij",
+          "size": 500
+        },
+        {
+          "name": "bstr",
+          "size": 392
+        },
+        {
+          "name": "serde_urlencoded",
+          "size": 388
+        },
+        {
+          "name": "fastrand",
+          "size": 380
+        },
+        {
+          "name": "untrusted",
+          "size": 368
+        },
+        {
+          "name": "futures_util",
+          "size": 308
+        },
+        {
+          "name": "socket2",
+          "size": 296
+        },
+        {
+          "name": "rand",
+          "size": 288
+        },
+        {
+          "name": "__rustc",
+          "size": 284
+        },
+        {
+          "name": "rustix",
+          "size": 252
+        },
+        {
+          "name": "atomic_waker",
+          "size": 248
+        },
+        {
+          "name": "want",
+          "size": 216
+        },
+        {
+          "name": "signal_hook",
+          "size": 204
+        },
+        {
+          "name": "serde_spanned",
+          "size": 188
+        },
+        {
+          "name": "itoa",
+          "size": 180
+        },
+        {
+          "name": "indexmap",
+          "size": 180
+        },
+        {
+          "name": "same_file",
+          "size": 144
+        },
+        {
+          "name": "rand_core",
+          "size": 124
+        },
+        {
+          "name": "subtle",
+          "size": 108
+        },
+        {
+          "name": "zeroize",
+          "size": 100
+        },
+        {
+          "name": "anstyle_parse",
+          "size": 72
+        },
+        {
+          "name": "icu_properties",
+          "size": 64
+        },
+        {
+          "name": "zerocopy",
+          "size": 60
+        },
+        {
+          "name": "nix",
+          "size": 56
+        },
+        {
+          "name": "num_traits",
+          "size": 44
+        },
+        {
+          "name": "fs2",
+          "size": 40
+        },
+        {
+          "name": "potential_utf",
+          "size": 28
+        },
+        {
+          "name": "errno",
+          "size": 24
+        },
+        {
+          "name": "zerovec",
+          "size": 12
+        }
+      ]
+    },
+    "functions": {
+      "file-size": 7579416,
+      "text-section-size": 2747552,
+      "functions": [
+        {
+          "crate": "ruvx",
+          "name": "ruvx::start::{{closure}}",
+          "size": 33768
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::agent::run::{{closure}}",
+          "size": 27156
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::ui::screen::render",
+          "size": 20188
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::mcp::Manager::execute::{{closure}}",
+          "size": 19776
+        },
+        {
+          "crate": "regex_automata",
+          "name": "regex_automata::meta::strategy::new",
+          "size": 16752
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::auth::login_inner::{{closure}}",
+          "size": 16032
+        },
+        {
+          "crate": "clap_builder",
+          "name": "clap_builder::parser::parser::Parser::get_matches_with",
+          "size": 16032
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::ui::App::submit",
+          "size": 15248
+        },
+        {
+          "crate": "reqwest",
+          "name": "reqwest::async_impl::client::ClientBuilder::build",
+          "size": 13604
+        },
+        {
+          "crate": "http",
+          "name": "http::header::name::StandardHeader::from_bytes",
+          "size": 13100
+        },
+        {
+          "crate": "toml_edit",
+          "name": "toml_edit::parser::value::value",
+          "size": 12424
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::tools::shell::run::{{closure}}",
+          "size": 12068
+        },
+        {
+          "crate": "rustls",
+          "name": "rustls::conn::ConnectionCore<Data>::process_msg",
+          "size": 11920
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::provider::build_request",
+          "size": 11056
+        },
+        {
+          "crate": "rustls",
+          "name": "<rustls::msgs::handshake::ClientHelloPayload as rustls::msgs::codec::Codec>::read",
+          "size": 10916
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::provider::StreamTurn::event",
+          "size": 10884
+        },
+        {
+          "crate": "ruvx",
+          "name": "ruvx::provider::generate::{{closure}}",
+          "size": 10652
+        },
+        {
+          "crate": "hyper_util",
+          "name": "hyper_util::client::legacy::client::Client<C,B>::send_request::{{closure}}",
+          "size": 9788
+        },
+        {
+          "crate": "reqwest",
+          "name": "hyper::proto::h1::dispatch::Dispatcher<D,Bs,I,T>::poll_read",
+          "size": 9604
+        },
+        {
+          "crate": "std",
+          "name": "std::backtrace_rs::symbolize::gimli::resolve",
+          "size": 9324
+        }
+      ]
+    }
+  },
+  "main_binary": {
+    "path": "target/release/ruvx",
+    "bytes": 4252400,
+    "sha256": "099bbb998eaca7f27d274a5994073835083fe96e3c2c9661e14cc96f6066087d",
+    "build_command": "cargo +1.89.0 build --release --locked --bin ruvx -j 1",
+    "help_and_version_passed": true,
+    "terminal_validation_passed": true,
+    "performance": {
+      "samples": 20,
+      "startup_ms": [
+        54.65841700788587,
+        53.877958038356155,
+        54.5639589545317,
+        54.65816700598225,
+        53.05633303942159,
+        54.43066597217694,
+        54.49937499361113,
+        53.999624971766025,
+        55.801124952267855,
+        56.12137500429526,
+        55.02691597212106,
+        54.11779199494049,
+        55.20341597730294,
+        54.96899998979643,
+        54.334166983608156,
+        54.72445802297443,
+        59.049832983873785,
+        52.97266703564674,
+        54.70891599543393,
+        54.59508299827576
+      ],
+      "startup_p95_ms": 56.121,
+      "startup_median_ms": 54.627,
+      "idle_observation_seconds": 10,
+      "idle_rss_max_bytes": 9011200,
+      "binary_bytes": 4252400,
+      "conditions": "warm-cache, isolated small config/new session, PTY 100x40, no discovery/inference/child shell"
+    },
+    "functional_scenarios_passed": 22,
+    "git_workflow": {
+      "local_commit_and_push": "passed",
+      "repeated_approval_click": "ignored",
+      "enter_during_push": "draft preserved; push continued",
+      "external_remotes_used": false
+    },
+    "git_auth": {
+      "http_401": "captured failure with authentication hint",
+      "controlling_terminal": "detached",
+      "external_services_used": false
+    },
+    "bypass": {
+      "cli_and_tui": "passed",
+      "shell_and_mcp_without_approval": "passed",
+      "off_restores_approval": "passed",
+      "restart_defaults_to_ask": "passed"
+    },
+    "load_profile": {
+      "workspace_text_files": 256,
+      "workspace_text_bytes_per_file": 4096,
+      "streamed_text_bytes": 32785,
+      "additional_historical_conversations": 256,
+      "observed_parent_rss_max_bytes_by_stage": {
+        "file_tools_and_streaming": 11206656,
+        "snapshot_and_shell": 11272192,
+        "larger_resume": 9895936
+      },
+      "method": "ps RSS samples during PTY activity, at most every 50ms; excludes child processes; observational maxima, not guaranteed instantaneous peaks"
+    },
+    "paste_profile": {
+      "cases": [
+        {
+          "paste_bytes": 1048576,
+          "transfer_and_preview_ms": 172.229,
+          "keyboard_response_ms": 51.824,
+          "observed_parent_rss_max_bytes": 16023552
+        },
+        {
+          "paste_bytes": 10485760,
+          "transfer_and_preview_ms": 1222.699,
+          "keyboard_response_ms": 50.276,
+          "preflight_context_rejected_draft_preserved": true,
+          "observed_parent_rss_max_bytes": 66994176
+        }
+      ],
+      "method": "Bracketed paste through PTY, including terminal transfer/decoding and 30 FPS rendering; ps parent RSS every 50ms; no provider inference"
+    }
+  },
+  "release_tests": {
+    "command": "cargo +1.89.0 test --release --locked --all-targets -j 1",
+    "exit_code": 0,
+    "passed": 193,
+    "failed": 0,
+    "ignored": 0,
+    "groups": {
+      "src/lib.rs": 160,
+      "src/main.rs": 0,
+      "tests/agent_workflows.rs": 28,
+      "tests/claude_connection.rs": 5
+    },
+    "build_and_test_elapsed_seconds": 700.093
+  }
+}

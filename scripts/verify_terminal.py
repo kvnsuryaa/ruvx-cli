@@ -450,6 +450,8 @@ def functional(binary):
             terminal.wait(lambda: "Save configuration" in terminal.grid.text(), "MCP configuration review")
             assert "fixture-tools" not in extension_config().get("mcp_servers", {})
             terminal.enter("save")
+            terminal.wait(lambda: "fixture-tools" in extension_config().get("mcp_servers", {}),
+                          "MCP configuration saved")
             saved = extension_config()["mcp_servers"]["fixture-tools"]
             assert saved["enabled"] and saved["timeout_seconds"] == 60 and saved["max_message_bytes"] == 1048576
             terminal.enter("/mcp edit fixture-tools")

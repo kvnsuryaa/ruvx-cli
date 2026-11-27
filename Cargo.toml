@@ -38,9 +38,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [dev-dependencies]
 axum = "0.8"
 
+# Size/performance measurements: docs/binary-size.md
 [profile.release]
-opt-level = "s"
-lto = "thin"
+opt-level = "z"
+lto = "fat"
 codegen-units = 1
 strip = true
 
